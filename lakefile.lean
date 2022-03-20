@@ -1,5 +1,5 @@
 import Lake
-open Lake DSL
+open System Lake DSL
 
 
 def buildDir := defaultBuildDir
@@ -23,11 +23,11 @@ def cLibTarget (pkgDir : FilePath) : FileTarget :=
   let libFile := pkgDir / buildDir / cDir / "libql.a"
   staticLibTarget libFile #[
                             ffiOTarget pkgDir "data_marshal.c",
-                            ffiOTarget pkgDir "mutex_ffi.c",
+                            ffiOTarget pkgDir "mutex_ffi.c"
                             ]
 
 
-package QingLong (args) {
+package QingLong (pkgDir) (args) {
   srcDir := "src"
 
   -- specify the c binding library as an additional target
