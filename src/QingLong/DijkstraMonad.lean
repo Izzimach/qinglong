@@ -25,7 +25,7 @@ def MRrun {α : Type} {z : α} {mz : BaseMonad α} (d : MonadResultIs z) : α :=
 #reduce MRrun (MRret 3)
 #reduce MRrun (MRbind (MRret 2) (fun _ => MRret 3))
 -- here we try to run the monad and enforce a return value (4) that is wrong (actually returns 3).  This should produce and error
-#check @MRrun Nat 4 _ (MRret 3)
+#check @MRrun Nat 4 _ (MRret 4)
 
 
 def dPred (α : Type) : Type := α → Prop
@@ -35,32 +35,32 @@ def retEqProof {α : Type} (v : α) : retEqPred v v := show v = v by rfl
 
 def bindPred {α β : Type} (p : dPred α) (f : α → dPred β) : dPred β := fun b => ∃ (a:α), p a ∧ f a b
 
-inductive MonadWithPredicate {α : Type} : α → dPred α → Type where
-| mk : (mz : BaseMonad α) → (pf : p mz.output) → MonadWithPredicate (mz.output) p
+inductive MonadWithPredicate (α : Type) : dPred α → Type where
+| mk : (mz : BaseMonad α) → (pf : p mz.output) → MonadWithPredicate α p
 
 def retMW {α : Type} {p : dPred α} (v : α) (pf : p v) := MonadWithPredicate.mk (BaseMonad.mk v) pf
 
 -- bind that just uses the predicate of the most recent monad. All monads need to use the same predicate here.
-def bindMW {α : Type} {p : dPred α} {a b : α} {ma mb : BaseMonad α} : MonadWithPredicate a p → (α → MonadWithPredicate b p) → MonadWithPredicate b p :=
+def bindMW {α : Type} {p : dPred α} {a b : α} {ma mb : BaseMonad α} : MonadWithPredicate α p → (α → MonadWithPredicate α p) → MonadWithPredicate α p :=
   fun m1 m2 => match m1 with
                | MonadWithPredicate.mk mz1 pf1 => m2 mz1.output
 
 -- bind that combines (using AND) the predicates of both monads
-def bindMWAnd {α : Type} {p₁ p₂ : dPred α} {a b : α} : MonadWithPredicate a p₁ → (α → MonadWithPredicate b p₂) → MonadWithPredicate b (fun b => ∃x, p₁ x ∧ (p₂ b)) :=
+def bindMWAnd {α : Type} {p₁ p₂ : dPred α} : MonadWithPredicate α p₁ → (α → MonadWithPredicate α p₂) → MonadWithPredicate α (fun b => ∃x, p₁ x ∧ (p₂ b)) :=
   fun m1 m2 => match m1 with
                | MonadWithPredicate.mk mz1 pf1 =>
                  match (m2 mz1.output) with
                  | MonadWithPredicate.mk mz2 pf2 =>
                      MonadWithPredicate.mk mz2 (show ∃ x, p₁ x ∧ p₂ mz2.output from Exists.intro mz1.output (And.intro pf1 pf2))
 
-def runPred {α : Type} {a : α} (p : dPred α) (m : MonadWithPredicate (a : α) p) : p a :=
+def runPred {α : Type} (p : dPred α) (m : MonadWithPredicate α p) : ∃ x, p x :=
   match m with
-  | MonadWithPredicate.mk b pf => pf
+  | MonadWithPredicate.mk b pf => Exists.intro b.output pf
 
 
 #check show ∃ x, x=3 from Exists.intro 3 (_:3=3)
-#reduce (retMW 3 _ : MonadWithPredicate 3 (retEqPred 3))
-#reduce (retMW 3 (retEqProof 3) : MonadWithPredicate 3 (retEqPred 3))
+#reduce (retMW 3 _ : MonadWithPredicate Nat (retEqPred 3))
+#reduce (retMW 3 (retEqProof 3) : MonadWithPredicate Nat (retEqPred 3))
 #reduce (runPred (retEqPred 3) (retMW 3 _))
 #reduce (runPred _ (bindMW (retMW 3 (retEqProof 3)) (fun _ => retMW 3 (retEqProof 3))))
 #reduce (runPred _ (bindMWAnd (retMW 3 (retEqProof 3)) (fun _ => retMW 4 (retEqProof 4))))
@@ -87,26 +87,26 @@ def fPred (α : Type) : Type := Prop → α → Prop
 def simpleFP {α : Type} (v : α) : fPred α := fun (pre:Prop) (a : α) => pre ∧ a = v
 
 
-inductive MonadFwdPredicate {α : Type} : Prop → α → fPred α → Type where
-| mk : (mz : BaseMonad α) → (pf : ∀ (hpre : pre), p pre mz.output) → MonadFwdPredicate pre (mz.output) p
+inductive MonadFwdPredicate {α : Type} : Prop → fPred α → Type where
+| mk : (mz : BaseMonad α) → (pf : ∀ (hpre : pre), p pre mz.output) → MonadFwdPredicate pre p
 
 
-def retFP {α : Type} (v : α) {pre :Prop} : MonadFwdPredicate pre v (@simpleFP α v) :=
+def retFP {α : Type} (v : α) {pre :Prop} : MonadFwdPredicate pre (@simpleFP α v) :=
   let bm := BaseMonad.mk v
   MonadFwdPredicate.mk bm (fun (hpre : pre) => show simpleFP v pre bm.output from (And.intro hpre rfl))
 
-def bindFP {α :Type} {a b : α} {pre1 : Prop} {p₁ p₂ : fPred α} :
-  MonadFwdPredicate pre1 a p₁ → (α → MonadFwdPredicate (p₁ pre1 a) b p₂) → MonadFwdPredicate pre1 b (fun pre z => ∃ a, p₂ (p₁ pre a) z) :=
+def bindFP {α :Type} {pre1 : Prop} {p₁ p₂ : fPred α} :
+  MonadFwdPredicate pre1 p₁ → (α → MonadFwdPredicate (∃a, p₁ pre1 a) p₂) → MonadFwdPredicate pre1 (fun pre z => p₂ (∃a, p₁ pre a) z) :=
     fun m f => match m with 
                | MonadFwdPredicate.mk z1 pf1 =>
                    match (f z1.output) with
                    | MonadFwdPredicate.mk z2 pf2 =>
-                       MonadFwdPredicate.mk z2 (fun pre => Exists.intro z1.output (pf2 (pf1 pre)))
+                       MonadFwdPredicate.mk z2 (fun pre => (pf2 (Exists.intro z1.output (pf1 pre))))
 
 
-def runFP {α : Type} {pre1 :Prop} {a : α} {p₁ : fPred α} (m : MonadFwdPredicate pre1 a p₁) : pre1 → p₁ pre1 a :=
+def runFP {α : Type} {pre1 :Prop} {p₁ : fPred α} (m : MonadFwdPredicate pre1 p₁) : pre1 → ∃ a, p₁ pre1 a :=
   fun p1 => match m with 
-            | MonadFwdPredicate.mk ma pf => pf p1
+            | MonadFwdPredicate.mk ma pf => Exists.intro ma.output (pf p1)
 
 def sampleProg := runFP (bindFP (retFP 3) (fun _ => bindFP (retFP 5) (fun _ => retFP 4))) (rfl : 2=2)
 
@@ -128,7 +128,7 @@ inductive MonadBwdPredicate {α : Type} : α → bPred α → (α → Prop) → 
 
 
 
-def retBP {α : Type} (v : α) {post : α → Prop} (postpf: post v) : MonadBwdPredicate v (@simpleBP α v) post:=
+def retBP {α : Type} (v : α) {post : α → Prop} {postpf: post v} : MonadBwdPredicate v (@simpleBP α v) post:=
   let bm := BaseMonad.mk v
   MonadBwdPredicate.mk bm (fun x (he : x = bm.output) => postpf)
 
@@ -152,6 +152,10 @@ def runBP {α : Type} {post1 : α → Prop} {a : α} {p₁ : bPred α} (m : Mona
   fun a => match m with
            | MonadBwdPredicate.mk ma pf => pf a
 
-#check retBP 3 rfl
+#check retBP 3
 
-def sampleBack := runBP (retBP 3 rfl) 3
+def sampleBack := @runBP Nat (fun x => 3 = x → Eq 3 3) 3 (simpleBP 3) (@retBP Nat 3 _ id) 3
+def sampleBack2 : 3 = 3 → simpleBP 3 fun x => 3 = x → 3 = 3 := runBP (@retBP Nat 3 _ id) 3
+
+
+-- backward predicate for state monad
