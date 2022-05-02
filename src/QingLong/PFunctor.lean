@@ -24,6 +24,9 @@ instance [Inhabited P.A] [Inhabited α] : Inhabited (P.obj α) :=
 instance : Functor P.obj :=
   {map := P.map}
 
+-- an "identity" pfunctor
+def pfunctor0 : pfunctor := pfunctor.mk Unit (fun _ => Unit)
+def pfunctor0.mk {α :Type u} (a : α) : pfunctor0.obj α := ⟨ () , fun () => a ⟩
 
 /-- functor composition for polynomial functors -/
 def comp (P₂ P₁ : pfunctor.{u}) : pfunctor.{u} :=
