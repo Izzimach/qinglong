@@ -16,7 +16,7 @@ namespace FixHack
 variable {α : Sort u} {C : α → Sort v} {r : α → α → Prop}
 
 unsafe def fix'.impl (hwf : WellFounded r) (F : ∀ x, (∀ y, r y x → C y) → C x) (x : α) : C x :=
-  F x fun y _ => impl hwf F y
+  F x (fun y _ => impl hwf F y)
 
 set_option codegen false in
 @[implementedBy fix'.impl]
@@ -24,34 +24,47 @@ def fix' (hwf : WellFounded r) (F : ∀ x, (∀ y, r y x → C y) → C x) (x : 
 
 end FixHack
 
+-- We manually "compile" the Eff ↔ Arrs mutual inductive here, instead of letting Lean do it. This
+-- hopefully allows for better specifying/solving of well found recursion, especially when it
+-- enables Lean to automatically apply structural recursion.
+--
+-- The Bool "chooses" between Eff and Arrs: tt = Eff and ff = Arrs
+-- Note that Eff uses one less type index so we just throw Unit in there to fill space.
+-- another option might be to duplicate the result type, i.e. change "EffArrs r tt Unit a" to "EffArrs r tt a a"
+--
+inductive EffArrs (effs : List (Type → Type))  : Bool → Type → Type → Type 1 where
+| Pure : α → EffArrs effs true Unit α
+| Impure : (x : Type) → OU effs x → EffArrs effs false x α → EffArrs effs true Unit α
+| Leaf : (α → EffArrs effs true Unit β) → EffArrs effs false α β
+| Node : (x : Type) → EffArrs effs false α x → EffArrs effs false x β → EffArrs effs false α β
 
-mutual
+def effSize : EffArrs effs b α β → Nat
+| EffArrs.Pure _ => 1
+| EffArrs.Impure x ou n => effSize n + 1
+| EffArrs.Leaf f => 1
+| EffArrs.Node x l r => effSize l + effSize r
 
-inductive EffX (r : List (Type → Type)) : Type → Type 1 where
-| Pure : a → EffX r a
-| Impure : (e : Type) → OU r x → ArrsX r x a → EffX r a
+def effSize2 (y : EffArrs effs b α β) (z : EffArrs effs b' β γ) : Nat :=
+    (effSize y * 2) + effSize z
 
--- ArrsX r a b := FTCQueue (EffX r) a b
-inductive ArrsX (r : List (Type → Type)) : Type → Type → Type 1 where
-| Leaf : (a → EffX r b) → ArrsX r a b
-| Node : (e : Type) → ArrsX r a e → ArrsX r e b → ArrsX r a b
 
-end --mutual
-
-def Arr effs a b := a → EffX effs b
+-- don't know why I can't use 'tt' here
+def Arr effs a b := a → EffArrs effs true Unit b
 
 section
 
-variable {r : List (Type → Type)} {α : Type} {β : Type} {γ : Type} {t : Type → Type}
+variable {effs : List (Type → Type)} {α : Type} {β : Type} {γ : Type} {e : Type → Type}
 
-def tsingleton (f : α → EffX r β) : ArrsX r α β := ArrsX.Leaf f
+def tsingleton (f : α → EffArrs effs Bool.true Unit β) : EffArrs effs Bool.false α β := EffArrs.Leaf f
 
-def snoc (q : ArrsX r a γ) (f : γ → EffX r b) : ArrsX r a b := ArrsX.Node γ q (ArrsX.Leaf f)
+def snoc (q : EffArrs effs Bool.false a γ) (f : γ → EffArrs effs Bool.true Unit b) : EffArrs effs Bool.false a b :=
+    EffArrs.Node γ q (EffArrs.Leaf f)
 
-def append (q1 : ArrsX r a x) (q2 : ArrsX r x b) : ArrsX r a b := ArrsX.Node x q1 q2
+def append (q1 : EffArrs effs Bool.false a x) (q2 : EffArrs effs Bool.false x b) : EffArrs effs Bool.false a b :=
+    EffArrs.Node x q1 q2
 
-def send {v : Type} [HasEffect t r] : t v → EffX r v :=
-    fun tv => EffX.Impure v (HasEffect.inject tv) (tsingleton EffX.Pure)
+def send {x : Type} [HasEffect e effs] : e x → EffArrs effs Bool.true Unit x :=
+    fun tv => EffArrs.Impure x (HasEffect.inject tv) (tsingleton EffArrs.Pure)
 
 end
 
@@ -64,48 +77,44 @@ macro_rules
   | `($s >< $t) => `(append $s $t)
 
 
+inductive ViewLL (effs : List (Type → Type)) : Type → Type → Type 1 where
+  | VOne : (α → EffArrs effs Bool.true Unit β) → ViewLL effs α β
+  | VCons : (x : Type) → (α → EffArrs effs Bool.true Unit x) → EffArrs effs Bool.false x β → ViewLL effs α β
 
-
-inductive ViewLL (r : List (Type → Type)) : Type → Type → Type 1 where
-  | VOne : (a → EffX r b) → ViewLL r a b
-  | VCons : (e : Type) → (a → (EffX r) e) → ArrsX r e b → ViewLL r a b
-
--- needs well founded proof
-def tviewL' (y : ArrsX r a x) (z : ArrsX r x b) : ViewLL r a b :=
+def tviewL' (y : EffArrs effs Bool.false α γ) (z : EffArrs effs Bool.false γ β) : ViewLL effs α β :=
   match y with
-  | (ArrsX.Leaf f) => ViewLL.VCons x f z
-  | (ArrsX.Node e f q) => tviewL' f (ArrsX.Node x q z)
-  termination_by tviewL' y z => 1
-  decreasing_by sorry
+  | (EffArrs.Leaf f) => ViewLL.VCons γ f z
+  | (EffArrs.Node x f q) => tviewL' f (@EffArrs.Node effs x β γ q z)
+  -- the pure/impure nodes are illegal here
 
-def tviewL : ArrsX r a b → ViewLL r a b
-  | ArrsX.Leaf f => ViewLL.VOne f
-  | ArrsX.Node e f q => tviewL' f q
+def tviewL : EffArrs effs Bool.false α β → ViewLL effs α β
+  | EffArrs.Leaf f => ViewLL.VOne f
+  | EffArrs.Node e f q => tviewL' f q
+  -- the pure/impure nodes are illegal here
 
--- this also need well founded proof
--- what a mess
-def qApp (q : ArrsX r β w) (x : β) : EffX r w :=
-  let bind' {α : Type} : EffX r α → ArrsX r α w → EffX r w :=
-    fun ef ar => match ef with
-                 | EffX.Pure y => @qApp r α w ar y
-                 | EffX.Impure e u q => EffX.Impure e u (q >< ar)
+
+-- stil need to prove this well-founded
+def qApp (q : EffArrs effs Bool.false β w) (x : β) : EffArrs effs Bool.true Unit w :=
   match (tviewL q) with
   | ViewLL.VOne k => k x
-  | ViewLL.VCons e k t => bind' (k x) t
-  termination_by qApp q x => 1
-  decreasing_by sorry
+  | ViewLL.VCons e k t => match (k x) with
+                          | EffArrs.Pure y => have h : effSize t < effSize q := sorry
+                                              qApp t y
+                          | EffArrs.Impure x ou n => EffArrs.Impure x ou (n >< t)
+  termination_by qApp q x => effSize q
+  
 
-instance : Monad (EffX r) where
-  pure := EffX.Pure
+instance : Monad (EffArrs effs Bool.true Unit) where
+  pure := EffArrs.Pure
   bind := fun m f =>
     match m with
-    | EffX.Pure a => f a
-    | EffX.Impure e u ar => EffX.Impure e u (ar |→ f)
+    | EffArrs.Pure a => f a
+    | EffArrs.Impure x ou n => EffArrs.Impure x ou (n |→ f)
 
 inductive Reader (i : Type) : Type → Type where
 | Get : Reader i i
 
-def ask [HasEffect (Reader i) effs] : EffX effs i := send Reader.Get
+def ask [HasEffect (Reader i) effs] : EffArrs effs Bool.true Unit i := send Reader.Get
 
 def decomp {effs : List (Type → Type)} {e : Type → Type} {α : Type} : OU (e :: effs) α → Sum (OU effs α) (e α) :=
   fun ou => match ou with
@@ -115,18 +124,20 @@ def decomp {effs : List (Type → Type)} {e : Type → Type} {α : Type} : OU (e
                                  Sum.inl <| OU.mk ix' tx
                 | Option.some z => Sum.inr z
 
-def qComp (g : ArrsX effs a b) (h : EffX effs b → EffX effs' c) : Arr effs' a c :=
+def qComp (g : EffArrs effs false α β) (h : EffArrs effs true Unit β → EffArrs effs' true Unit γ) : Arr effs' α γ :=
   h ∘ qApp g
 
-def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : EffX (Reader i :: effs) α → EffX effs α :=
+def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : EffArrs (Reader i :: effs) true Unit α → EffArrs effs Bool.true Unit α :=
   fun m =>
     match m with
-    | EffX.Pure a => pure a
-    | EffX.Impure e u ar =>
-        match decomp u with
-        | Sum.inl u' => EffX.Impure e u' (tsingleton <| qComp ar (runReader inp))
-        | Sum.inr (Reader.Get) => runReader inp <| qApp ar inp
-  termination_by runReader q x => 1
+    | EffArrs.Pure a => pure a
+    | EffArrs.Impure x ou n =>
+        match decomp ou with
+        | Sum.inl ou' => EffArrs.Impure x ou' (tsingleton <| qComp n (runReader inp))
+        | Sum.inr (Reader.Get) => runReader inp <| qApp n inp
+  termination_by runReader i q => effSize q
   decreasing_by sorry
+
+
 
 end effW
