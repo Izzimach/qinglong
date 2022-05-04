@@ -1,5 +1,5 @@
-
 universe u v
+
 
 --
 -- Conor McBride's indexed monads based on indexed types
@@ -133,5 +133,30 @@ instance {ix : Type u} {p : (ix → Type u) → ix → Type u} [IFunctor p]: IFu
               match fhp with 
               | FH.FHX x => FH.FHX (IFunctor.imap h i x)
 
-def FHOpen : Type := sorry
 
+
+--
+-- free indexed monads from StackOverflow by Cirdec
+--
+
+class Functor1 (f : ix → Type u → Type (u + 1)) where
+  fmap1 {a b : Type u} {i : ix} : (a → b) → f i a → f i b
+
+
+inductive ActionF : (ix : List (Type u)) → (next : Type u) → Type (u+1) where
+  | Input {a : Type u} : (a → next) → ActionF [a] next
+  | Output : String → next → ActionF Nil next
+
+
+instance : Functor (ActionF ix) where
+  map f := fun x => open ActionF in
+             match x with
+             | Input nx => Input (fun ix => f (nx ix))
+             | Output s nx => Output s (f nx)
+
+instance : Functor1 ActionF where
+  fmap1 f := Functor.map f
+
+inductive FreeIx (f : List (Type u) → Type v → Type (u)) : List (Type u) → Type u → Type (u+1) where
+  | Return : a → FreeIx f [a] a
+  | Free : f i (FreeIx f j a) → FreeIx f (i ++ j) a
