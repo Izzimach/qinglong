@@ -3,43 +3,55 @@
 
 import QingLong.PFunctor
 import QingLong.Wtype
+import QingLong.OpenUnion
 
 open pfunctor
 open Wtype
+open openunion
 
 namespace effW
 
-inductive Union (effs : List Type) (x : Type) : Type where
-| mk : x → Union effs x
+namespace FixHack
 
-class HasEffect (t : Type → Type) (effs : List Type) where
-   inject  : t v → Union effs v
-   project : Union r v → Option (t v)
+variable {α : Sort u} {C : α → Sort v} {r : α → α → Prop}
 
+unsafe def fix'.impl (hwf : WellFounded r) (F : ∀ x, (∀ y, r y x → C y) → C x) (x : α) : C x :=
+  F x fun y _ => impl hwf F y
+
+set_option codegen false in
+@[implementedBy fix'.impl]
+def fix' (hwf : WellFounded r) (F : ∀ x, (∀ y, r y x → C y) → C x) (x : α) : C x := hwf.fix F x
+
+end FixHack
 
 
 mutual
 
-inductive EffX (r : List Type) : Type → Type 1 where
+inductive EffX (r : List (Type → Type)) : Type → Type 1 where
 | Pure : a → EffX r a
-| Impure : (e : Type) → Union r x → ArrsX r x a → EffX r a
+| Impure : (e : Type) → OU r x → ArrsX r x a → EffX r a
 
 -- ArrsX r a b := FTCQueue (EffX r) a b
-inductive ArrsX (r : List Type) : Type → Type → Type 1 where
+inductive ArrsX (r : List (Type → Type)) : Type → Type → Type 1 where
 | Leaf : (a → EffX r b) → ArrsX r a b
 | Node : (e : Type) → ArrsX r a e → ArrsX r e b → ArrsX r a b
 
 end --mutual
 
+def Arr effs a b := a → EffX effs b
+
 section
 
-variable {r : List Type} {α : Type} {β : Type} {γ : Type}
+variable {r : List (Type → Type)} {α : Type} {β : Type} {γ : Type} {t : Type → Type}
 
 def tsingleton (f : α → EffX r β) : ArrsX r α β := ArrsX.Leaf f
 
 def snoc (q : ArrsX r a γ) (f : γ → EffX r b) : ArrsX r a b := ArrsX.Node γ q (ArrsX.Leaf f)
 
 def append (q1 : ArrsX r a x) (q2 : ArrsX r x b) : ArrsX r a b := ArrsX.Node x q1 q2
+
+def send {v : Type} [HasEffect t r] : t v → EffX r v :=
+    fun tv => EffX.Impure v (HasEffect.inject tv) (tsingleton EffX.Pure)
 
 end
 
@@ -54,7 +66,7 @@ macro_rules
 
 
 
-inductive ViewLL (r : List Type) : Type → Type → Type 1 where
+inductive ViewLL (r : List (Type → Type)) : Type → Type → Type 1 where
   | VOne : (a → EffX r b) → ViewLL r a b
   | VCons : (e : Type) → (a → (EffX r) e) → ArrsX r e b → ViewLL r a b
 
@@ -90,5 +102,31 @@ instance : Monad (EffX r) where
     | EffX.Pure a => f a
     | EffX.Impure e u ar => EffX.Impure e u (ar |→ f)
 
+inductive Reader (i : Type) : Type → Type where
+| Get : Reader i i
+
+def ask [HasEffect (Reader i) effs] : EffX effs i := send Reader.Get
+
+def decomp {effs : List (Type → Type)} {e : Type → Type} {α : Type} : OU (e :: effs) α → Sum (OU effs α) (e α) :=
+  fun ou => match ou with
+            | @OU.mk (e :: effs) α t' ix tx =>
+                match @CompareT.areEquiv t' e _ α tx with
+                | Option.none => let ix' := mkElemIndex <| (unElemIndex ix) - 1
+                                 Sum.inl <| OU.mk ix' tx
+                | Option.some z => Sum.inr z
+
+def qComp (g : ArrsX effs a b) (h : EffX effs b → EffX effs' c) : Arr effs' a c :=
+  h ∘ qApp g
+
+def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : EffX (Reader i :: effs) α → EffX effs α :=
+  fun m =>
+    match m with
+    | EffX.Pure a => pure a
+    | EffX.Impure e u ar =>
+        match decomp u with
+        | Sum.inl u' => EffX.Impure e u' (tsingleton <| qComp ar (runReader inp))
+        | Sum.inr (Reader.Get) => runReader inp <| qApp ar inp
+  termination_by runReader q x => 1
+  decreasing_by sorry
 
 end effW
