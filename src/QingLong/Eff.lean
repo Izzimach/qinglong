@@ -5,6 +5,10 @@ import QingLong.PFunctor
 import QingLong.Wtype
 import QingLong.OpenUnion
 
+import Lean
+open Lean Elab Command Term --Meta
+
+
 open pfunctor
 open Wtype
 open openunion
@@ -27,16 +31,29 @@ end FixHack
 
 mutual
 
-inductive EffX (r : List (Type → Type)) : Type → Type 1 where
-| Pure : a → EffX r a
-| Impure : (e : Type) → OU r x → ArrsX r x a → EffX r a
+inductive EffX (effs : List (Type → Type)) : Type → Type 1 where
+| Pure : α → EffX effs α
+| Impure : (γ : Type) → OU effs γ → ArrsX effs γ α → EffX effs α
 
 -- ArrsX r a b := FTCQueue (EffX r) a b
-inductive ArrsX (r : List (Type → Type)) : Type → Type → Type 1 where
-| Leaf : (a → EffX r b) → ArrsX r a b
-| Node : (e : Type) → ArrsX r a e → ArrsX r e b → ArrsX r a b
+inductive ArrsX (effs : List (Type → Type)) : Type → Type → Type 1 where
+| Leaf : (a → EffX effs b) → ArrsX effs a b
+| Node : (e : Type) → ArrsX effs a e → ArrsX effs e b → ArrsX effs a b
 
 end --mutual
+
+def asString (ar : ArrsX r a b) : String :=
+  match ar with
+  | ArrsX.Leaf f => "Leaf"
+  | ArrsX.Node e l r => "Node, l=" ++ asString l ++ ", r=" ++ asString r
+
+#check reflType Nat
+
+instance [ToString α] : ToString (EffX r α) where
+  toString ef := match ef with
+                 | EffX.Pure a => "Pure " ++ toString a
+                 | EffX.Impure e ou n => "Impure (" ++ (asStringOU ou) ++ ") (" ++ asString n ++ ")"
+
 
 def Arr effs a b := a → EffX effs b
 
@@ -75,8 +92,6 @@ def tviewL' (y : ArrsX r a x) (z : ArrsX r x b) : ViewLL r a b :=
   match y with
   | (ArrsX.Leaf f) => ViewLL.VCons x f z
   | (ArrsX.Node e f q) => tviewL' f (ArrsX.Node x q z)
-  termination_by tviewL' y z => 1
-  decreasing_by sorry
 
 def tviewL : ArrsX r a b → ViewLL r a b
   | ArrsX.Leaf f => ViewLL.VOne f
@@ -105,15 +120,16 @@ instance : Monad (EffX r) where
 inductive Reader (i : Type) : Type → Type where
 | Get : Reader i i
 
+instance : ShowEff (Reader i) where
+    effString := "Reader"
+
+
 def ask [HasEffect (Reader i) effs] : EffX effs i := send Reader.Get
 
-def decomp {effs : List (Type → Type)} {e : Type → Type} {α : Type} : OU (e :: effs) α → Sum (OU effs α) (e α) :=
+def decomp {effs : List (Type → Type)} {α : Type} (e : Type → Type) : OU (e :: effs) α → Sum (OU effs α) (e α) :=
   fun ou => match ou with
-            | @OU.mk (e :: effs) α t' ix tx =>
-                match @CompareT.areEquiv t' e _ α tx with
-                | Option.none => let ix' := mkElemIndex <| (unElemIndex ix) - 1
-                                 Sum.inl <| OU.mk ix' tx
-                | Option.some z => Sum.inr z
+            | OU.Leaf l => Sum.inr l
+            | OU.Cons c => Sum.inl c
 
 def qComp (g : ArrsX effs a b) (h : EffX effs b → EffX effs' c) : Arr effs' a c :=
   h ∘ qApp g
@@ -122,11 +138,24 @@ def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : E
   fun m =>
     match m with
     | EffX.Pure a => pure a
-    | EffX.Impure e u ar =>
-        match decomp u with
-        | Sum.inl u' => EffX.Impure e u' (tsingleton <| qComp ar (runReader inp))
-        | Sum.inr (Reader.Get) => runReader inp <| qApp ar inp
+    | EffX.Impure e ou ar =>
+        match decomp (Reader i) ou with
+          | Sum.inl u' => EffX.Impure e u' (tsingleton <| qComp ar (runReader inp))
+          | Sum.inr (Reader.Get) => runReader inp <| qApp ar inp
   termination_by runReader q x => 1
   decreasing_by sorry
+
+def addGet : Nat → EffX [Reader Nat] Nat :=
+  fun x => ask >>= fun i => pure (i+x)
+
+def run [Inhabited a] : EffX [] a → a
+| EffX.Pure a => a
+| EffX.Impure x ou n => default
+
+def z : EffX [Reader Nat] Nat := (EffX.Impure Nat (HasEffect.inject Reader.Get) (tsingleton EffX.Pure))
+
+#eval z
+
+#eval run <| runReader 10 <| (EffX.Impure Nat (HasEffect.inject Reader.Get) (tsingleton EffX.Pure))
 
 end effW

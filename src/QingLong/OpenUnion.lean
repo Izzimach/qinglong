@@ -1,54 +1,53 @@
 -- open union for use with Eff
 import Lean
-open Lean Elab Command Term
+open Lean Elab Command Term Meta
 
 namespace openunion
 
-def ElemIndex (t : Type → Type) (r : List (Type → Type)) := Nat
-
-def mkElemIndex {t : Type → Type} {r : List (Type → Type)} (x : Nat) : ElemIndex t r := x
-def unElemIndex (e : ElemIndex t r) : Nat := e
+class ShowEff (t : Type → Type) where
+  effString : String
 
 
-inductive OU (r : List (Type → Type)) (x : Type) : Type 1 where
-| mk : {t : Type → Type} → ElemIndex t r → t x → OU r x
+def showType (t : Syntax) : TermElabM Expr := do
+  let ty ← elabType t
+  match ty with
+  | Expr.fvar id d   => pure <| mkStrLit <| toString ty --"Fvar " ++ (toString id.name)
+  | Expr.app f arg d => pure <| mkStrLit <| "App " ++ toString f ++ " " ++ toString arg
+  | _ => pure <| mkStrLit <| Expr.ctorName ty
 
-
-class FindElem (t : Type → Type) (r : List (Type → Type)) where
-     eindex : ElemIndex t r
-
-instance : FindElem (t : Type → Type) (List.cons t r) where
-     eindex := mkElemIndex 0
-
-instance [FindElem t r] : FindElem t (List.cons t' r) where
-     eindex := mkElemIndex (1 + unElemIndex (FindElem.eindex : ElemIndex t r))
+elab "reflType" t:term : term => showType t
 
 
 
-class HasEffect (t : Type → Type) (effs : List (Type → Type)) where
-   inject  : t v → OU effs v
-   project : OU effs v → Option (t v)
+inductive OU : List (Type → Type) → Type → Type 1 where
+| Leaf : t x → OU (t :: effs) x
+| Cons : OU effs x → OU (t :: effs) x
 
+def asStringOU (ou : OU r α) : String := 
+  match ou with
+  | OU.Leaf l => "Leaf"
+  | OU.Cons c => "Node/" ++ asStringOU c
 
+instance [ToString x] : ToString (OU r x) where
+    toString := asStringOU
 
 -- the freer-simple library used an unsafeCoerce to convert (t v) to (t' v) since it had
--- already verifired (t = t') by looking at the index in the OU. Here we use a typeclass.
+-- already verifired (t = t') by looking at the index in the OU. Here we use typeclasses
+-- to generate a sum type in OU
 
-class CompareT (t : Type → Type) (t' : Type → Type) where
-  areEquiv : t v → Option (t' v)
+class HasEffect (e : Type → Type) (effs : List (Type → Type)) where
+  inject : e α → OU effs α
+  project : OU effs α → Option (e α)
 
-@[defaultInstance]
-instance : CompareT t t where
-   areEquiv := fun tv => Option.some tv
+instance : HasEffect (r : Type → Type) (r :: effs) where
+  inject := fun ea => OU.Leaf ea
+  project := fun ou => match ou with
+                       | OU.Leaf l => Option.some l
+                       | OU.Cons c => Option.none
 
-instance : CompareT t1 t2 where
-   areEquiv := fun _ => Option.none
+instance [HasEffect r effs] : HasEffect (r : Type → Type) (x :: effs) where
+  inject := fun ea => OU.Cons (HasEffect.inject ea)
+  project := fun ou => match ou with
+                       | OU.Leaf l => Option.none
+                       | OU.Cons c => HasEffect.project c
 
-
-def rawProject {t : Type → Type} : (ou : OU effs v) → Option (t v)
-| @OU.mk effs v t' ix tv => CompareT.areEquiv tv
-
-
-instance [FindElem t effs] : HasEffect (t : Type → Type) (effs : List (Type → Type)) where
-   inject := fun tv => OU.mk (@FindElem.eindex t effs _) tv
-   project := rawProject
