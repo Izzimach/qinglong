@@ -31,5 +31,5 @@ package QingLong (pkgDir) (args) {
   srcDir := "src"
 
   -- specify the c binding library as an additional target
-  moreLibTargets := #[cLibTarget pkgDir]
+  --moreLibTargets := #[cLibTarget pkgDir]
 }
