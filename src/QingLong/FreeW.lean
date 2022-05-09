@@ -9,8 +9,8 @@ open Wtype
 namespace freeW
 
 inductive ZFree (α : Type u) : Type u where
-  | ZPure : α → ZFree α
-  | ZImpure
+    | ZPure : α → ZFree α
+    | ZImpure
 
 instance : Functor ZFree where
     map f
@@ -18,8 +18,8 @@ instance : Functor ZFree where
     | ZFree.ZImpure => ZFree.ZImpure
 
 def ZFreeBranch : ZFree α → Type
-  | ZFree.ZPure a => Fin 0 -- can't use False since we need a Type here, not a Prop
-  | ZFree.ZImpure => Unit
+    | ZFree.ZPure a => Fin 0 -- can't use False since we need a Type here, not a Prop
+    | ZFree.ZImpure => Unit
 
 def ZImpurePF (α : Type) : pfunctor := pfunctor.mk (ZFree α) ZFreeBranch
 
