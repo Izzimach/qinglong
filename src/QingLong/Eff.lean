@@ -20,7 +20,7 @@ namespace FixHack
 variable {α : Sort u} {C : α → Sort v} {r : α → α → Prop}
 
 unsafe def fix'.impl (hwf : WellFounded r) (F : ∀ x, (∀ y, r y x → C y) → C x) (x : α) : C x :=
-  F x fun y _ => impl hwf F y
+    F x fun y _ => impl hwf F y
 
 set_option codegen false in
 @[implementedBy fix'.impl]
@@ -32,27 +32,26 @@ end FixHack
 mutual
 
 inductive EffX (effs : List (Type → Type)) : Type → Type 1 where
-| Pure : α → EffX effs α
-| Impure : (γ : Type) → OU effs γ → ArrsX effs γ α → EffX effs α
+    | Pure : α → EffX effs α
+    | Impure : (γ : Type) → OU effs γ → ArrsX effs γ α → EffX effs α
 
 -- ArrsX r a b := FTCQueue (EffX r) a b
 inductive ArrsX (effs : List (Type → Type)) : Type → Type → Type 1 where
-| Leaf : (a → EffX effs b) → ArrsX effs a b
-| Node : (e : Type) → ArrsX effs a e → ArrsX effs e b → ArrsX effs a b
+    | Leaf : (a → EffX effs b) → ArrsX effs a b
+    | Node : (e : Type) → ArrsX effs a e → ArrsX effs e b → ArrsX effs a b
 
 end --mutual
 
 def asString (ar : ArrsX r a b) : String :=
-  match ar with
-  | ArrsX.Leaf f => "Leaf"
-  | ArrsX.Node e l r => "Node, l=" ++ asString l ++ ", r=" ++ asString r
+    match ar with
+    | ArrsX.Leaf f => "Leaf"
+    | ArrsX.Node e l r => "Node, l=" ++ asString l ++ ", r=" ++ asString r
 
-#check reflType Nat
 
 instance [ToString α] : ToString (EffX r α) where
-  toString ef := match ef with
-                 | EffX.Pure a => "Pure " ++ toString a
-                 | EffX.Impure e ou n => "Impure (" ++ (asStringOU ou) ++ ") (" ++ asString n ++ ")"
+    toString ef := match ef with
+                   | EffX.Pure a => "Pure " ++ toString a
+                   | EffX.Impure e ou n => "Impure (" ++ (asStringOU ou) ++ ") (" ++ asString n ++ ")"
 
 
 def Arr effs a b := a → EffX effs b
@@ -72,6 +71,8 @@ def send {v : Type} [HasEffect t r] : t v → EffX r v :=
 
 end
 
+-- used in the freer monads paper
+
 syntax term "|→" term : term
 macro_rules
   | `($s |→ $t) => `(snoc $s $t)
@@ -84,78 +85,145 @@ macro_rules
 
 
 inductive ViewLL (r : List (Type → Type)) : Type → Type → Type 1 where
-  | VOne : (a → EffX r b) → ViewLL r a b
-  | VCons : (e : Type) → (a → (EffX r) e) → ArrsX r e b → ViewLL r a b
+    | VOne : (a → EffX r b) → ViewLL r a b
+    | VCons : (e : Type) → (a → (EffX r) e) → ArrsX r e b → ViewLL r a b
 
--- needs well founded proof
 def tviewL' (y : ArrsX r a x) (z : ArrsX r x b) : ViewLL r a b :=
-  match y with
-  | (ArrsX.Leaf f) => ViewLL.VCons x f z
-  | (ArrsX.Node e f q) => tviewL' f (ArrsX.Node x q z)
+    match y with
+    | (ArrsX.Leaf f) => ViewLL.VCons x f z
+    | (ArrsX.Node e f q) => tviewL' f (ArrsX.Node x q z)
 
 def tviewL : ArrsX r a b → ViewLL r a b
-  | ArrsX.Leaf f => ViewLL.VOne f
-  | ArrsX.Node e f q => tviewL' f q
+    | ArrsX.Leaf f => ViewLL.VOne f
+    | ArrsX.Node e f q => tviewL' f q
 
--- this also need well founded proof
+-- Application of an effect array
+-- this needs well founded proof
 -- what a mess
 def qApp (q : ArrsX r β w) (x : β) : EffX r w :=
-  let bind' {α : Type} : EffX r α → ArrsX r α w → EffX r w :=
-    fun ef ar => match ef with
-                 | EffX.Pure y => @qApp r α w ar y
-                 | EffX.Impure e u q => EffX.Impure e u (q >< ar)
-  match (tviewL q) with
-  | ViewLL.VOne k => k x
-  | ViewLL.VCons e k t => bind' (k x) t
-  termination_by qApp q x => 1
-  decreasing_by sorry
+    match (tviewL q) with
+    | ViewLL.VOne k => k x
+    | ViewLL.VCons e k t =>
+        match (k x) with
+        | EffX.Pure y => qApp t y
+        | EffX.Impure e u q => EffX.Impure e u (q >< t)
+    termination_by qApp q x => 1
+    decreasing_by sorry
+
+-- Append an effect arrow onto the end of an array of effect arrows.
+-- Note this also modifies the stack of effects, and is used in handlers.
+def qComp (g : ArrsX effs a b) (h : EffX effs b → EffX effs' c) : Arr effs' a c :=
+    h ∘ qApp g
 
 instance : Monad (EffX r) where
-  pure := EffX.Pure
-  bind := fun m f =>
-    match m with
-    | EffX.Pure a => f a
-    | EffX.Impure e u ar => EffX.Impure e u (ar |→ f)
+    pure := EffX.Pure
+    bind := fun m f =>
+      match m with
+      | EffX.Pure a => f a
+      | EffX.Impure e u ar => EffX.Impure e u (ar |→ f)
 
-inductive Reader (i : Type) : Type → Type where
-| Get : Reader i i
+-- once you have handled all the effects, all you have left is "Eff [] a" and canuse
+-- run to extract the a
+def run : EffX [] a → a
+    | EffX.Pure a => a
 
-instance : ShowEff (Reader i) where
+-- A version of run that can be applied to a single monad that is
+-- left at the bottom of the effect stack. Usually this is IO
+def runM {m : Type → Type} [Monad m] : EffX [m] a → m a
+    | EffX.Pure a => pure a
+    | EffX.Impure e ou ar => 
+        match ou with
+        | OU.Leaf mb => mb >>= (fun b => runM <| qApp ar b)
+    termination_by runM q => 1
+    decreasing_by sorry
+
+-- process the top effect of an effect list. You provide the two functions
+-- to handle pure and instances of the effect.
+def handleRelay {effs : List (Type → Type)} {eff : Type → Type}
+    (handlePure : α → EffX effs β)
+    (handleEff : ∀ γ, eff γ → Arr effs γ β → EffX effs β)
+    : EffX (eff :: effs) α → EffX effs β 
+        | EffX.Pure x => handlePure x
+        | EffX.Impure e ou next =>
+            let k := qComp next (handleRelay handlePure handleEff) 
+            match ou with
+            | OU.Leaf me => handleEff e me k
+            | OU.Cons c => EffX.Impure _ c (tsingleton k)
+    termination_by handleRelay e => 1
+    decreasing_by sorry
+
+-- A version of handleRelay that threads state through the handler.
+-- Useful for state monads and related effects.
+def handleRelayS {effs : List (Type → Type)} {eff : Type → Type} {s : Type}
+    (state : s)
+    (handlePure : s → α → EffX effs β)
+    (handleEff : ∀ γ, s → eff γ → (s → Arr effs γ β) → EffX effs β)
+    : EffX (eff :: effs) α → EffX effs β 
+        | EffX.Pure x => handlePure state x
+        | EffX.Impure e ou next =>
+            let k := fun st x => handleRelayS st handlePure handleEff <| qApp next x
+            match ou with
+            | OU.Leaf me => handleEff e state me k
+            | OU.Cons c => EffX.Impure _ c (tsingleton <| k state)
+    termination_by handleRelayS e => 1
+    decreasing_by sorry
+
+
+def interpretWith {effs : List (Type → Type)} {eff : Type → Type}
+    (handleEff: ∀ γ, eff γ → (γ -> EffX effs β) -> EffX effs β)
+    : EffX (eff :: effs) β → EffX effs β :=
+        fun effVal => handleRelay pure handleEff effVal
+
+
+def interpret {effs : List (Type → Type)} {eff : Type → Type}
+    (handleEff : ∀ γ, (eff γ → EffX effs γ))
+    : EffX (eff :: effs) β → EffX effs β :=
+        fun effVal => handleRelay pure (fun g ef next => (handleEff g ef) >>= next) effVal
+
+    
+--
+-- Reader effect
+--
+
+inductive ReaderE (i : Type) : Type → Type where
+    | Ask : ReaderE i i
+
+instance : ShowEff (ReaderE i) where
     effString := "Reader"
 
+def ask [HasEffect (ReaderE i) effs] : EffX effs i := send ReaderE.Ask
 
-def ask [HasEffect (Reader i) effs] : EffX effs i := send Reader.Get
+def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : EffX (ReaderE i :: effs) α → EffX effs α :=
+    interpret (fun γ r => match r with 
+                          | ReaderE.Ask => pure inp)
 
-def decomp {effs : List (Type → Type)} {α : Type} (e : Type → Type) : OU (e :: effs) α → Sum (OU effs α) (e α) :=
-  fun ou => match ou with
-            | OU.Leaf l => Sum.inr l
-            | OU.Cons c => Sum.inl c
+def addGet : Nat → EffX [ReaderE Nat] Nat :=
+    fun x => ask >>= fun i => pure (i+x)
 
-def qComp (g : ArrsX effs a b) (h : EffX effs b → EffX effs' c) : Arr effs' a c :=
-  h ∘ qApp g
+#eval run <| runReader 10 <| addGet 2
 
-def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : EffX (Reader i :: effs) α → EffX effs α :=
-  fun m =>
-    match m with
-    | EffX.Pure a => pure a
-    | EffX.Impure e ou ar =>
-        match decomp (Reader i) ou with
-          | Sum.inl u' => EffX.Impure e u' (tsingleton <| qComp ar (runReader inp))
-          | Sum.inr (Reader.Get) => runReader inp <| qApp ar inp
-  termination_by runReader q x => 1
-  decreasing_by sorry
 
-def addGet : Nat → EffX [Reader Nat] Nat :=
-  fun x => ask >>= fun i => pure (i+x)
+--
+-- State effect
+--
 
-def run [Inhabited a] : EffX [] a → a
-| EffX.Pure a => a
-| EffX.Impure x ou n => default
+inductive StateE (s : Type) : Type → Type where
+    | Get : StateE s s
+    | Put : s → StateE s Unit
 
-def z : EffX [Reader Nat] Nat := (EffX.Impure Nat (HasEffect.inject Reader.Get) (tsingleton EffX.Pure))
+def get [HasEffect (StateE s) effs]              : EffX effs s   := send StateE.Get
+def put [HasEffect (StateE s) effs] (putVal : s) : EffX effs Unit := send <| StateE.Put putVal
 
-#eval z
 
-#eval run <| runReader 10 <| (EffX.Impure Nat (HasEffect.inject Reader.Get) (tsingleton EffX.Pure))
+def stateGo {s : Type}  (γ : Type) (state : s) (eff : StateE s γ) (next : s → Arr effs γ (α × s)) : EffX effs (α × s) := 
+    match eff with
+    | StateE.Get => next state state
+    | StateE.Put s' => next s' ()
+
+def runState {α : Type} {effs : List (Type → Type)} {s : Type} (state : s) : EffX (StateE s :: effs) α → EffX effs (α × s) :=
+    fun effVal => handleRelayS state (fun s x => pure (x,s)) stateGo effVal
+
+
+
 
 end effW
