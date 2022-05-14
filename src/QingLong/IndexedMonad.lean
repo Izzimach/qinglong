@@ -31,15 +31,18 @@ def liftVV : (α → β) → VerifiedValue α :→ VerifiedValue β :=
     | (VerifiedValue.VVal a) => VerifiedValue.VVal (f a)
 
 
-inductive LockedIndex {ix : Type u} (α : Type u) : ix → ix → Type u where
-| LockAt : α → (x : ix) → LockedIndex α x x
+inductive LockedValue {ix : Type u} (α : Type u) : ix → ix → Type u where
+| LockAt : α → (x : ix) → LockedValue α x x
+
+inductive UnlockedValue {ix : Type u} (α : Type u) : ix → Type u where
+| Ret : α → UnlockedValue α x 
 
 inductive LockProp {ix : Type u} (α : Type u) : (ix → Prop) → ix → Type u where
 | LockProp : α → (p : ix → Prop) → (x :ix) → LockProp α p x
 
 syntax term ";=;" term : term
 macro_rules
-| `($a ;=; $k) => `(LockedIndex $a $k)
+| `($a ;=; $k) => `(LockedValue $a $k)
 
 
 -- keep going! 加油！
@@ -60,103 +63,81 @@ def angelicBind {ix : Type u} {m : (ix → Type u) → ix → Type u} [IMonad m]
          m (a ;=; j) i → (a → m q j) → m q i :=
   fun mai mqj => @demonicBind ix m _ (a ;=; j) q r i mai 
                     (fun j' v => match v with
-                                 | (LockedIndex.LockAt a j') => mqj a)
+                                 | (LockedValue.LockAt a j') => mqj a)
 
 
 
-def akReturn {ix : Type u} {i : ix} {m : (ix → Type u) → ix → Type u} [IMonad m] (α : Type u) (a : α) : m (α ;=; i) i := 
-  @IMonad.iskip ix m _ (@LockedIndex ix α i) i (LockedIndex.LockAt a i)
+def returnLocked {ix : Type u} {i : ix} {m : (ix → Type u) → ix → Type u} [IMonad m] (α : Type u) (a : α) : m (α ;=; i) i := 
+  @IMonad.iskip ix m _ (@LockedValue ix α i) i (LockedValue.LockAt a i)
+
+def returnUnlocked {ix : Type u} {i : ix} {m : (ix → Type u) → ix → Type u} [IMonad m] (α : Type u) (a : α) : m (UnlockedValue α) i :=
+  @IMonad.iskip ix m _ (@UnlockedValue ix α) i (@UnlockedValue.Ret ix α i a)
 
 
 -- Identity as an indexed functor
-inductive IxId {ix : Type u} (p : ix → Type u) : ix → Type u where
-| IxId : (f : p i) → IxId p i
+inductive IxId (p : ix → Type u) : ix → Type u where
+| IxId : p i → IxId p i
 
 instance {ix : Type u} : IFunctor (@IxId ix) where
   imap h := fun (i : ix) v =>
               match v with
               | IxId.IxId f => IxId.IxId (h i f)
 
--- IxId as a function synonym instead
+instance : @IMonad ix IxId where
+  iskip := fun i pi => IxId.IxId pi
+  iextend := fun pq ip pip => match pip with
+                              | IxId.IxId f => pq ip f
+
+--  Indexed Identity as a function synonym instead
 def IdentityX {ix : Type u} : (ix → Type u) → ix → Type u := id
 
 instance {ix : Type u} : IFunctor (@IdentityX ix) where
   imap h := fun (i : ix) f => h i f
 
-
--- Index holder is a simple indexed datatype (ix → Type u)
-inductive IndexHolder {ix : Type u} : ix → Type u where
-| IDH : (i : ix) → IndexHolder i
-
-#check IndexHolder.IDH 3
-#check IdentityX IndexHolder true
-
-inductive FileState : Prop where
-| FileOpen
-| FileClosed
-
-inductive FileState0 : Type 0 where
-| FileOpen0
-| FileClosed0
-
-inductive FileState1 : Type 1 where
-| FileOpen1
-| FileClosed1
-
-inductive Unit1 : Type 1 where
-| U1
-
-inductive StateTransition {ix : Type u} (p q r : ix → Type u) : ix → Type u where
-| STr : p i → (q :→ r) → StateTransition p q r i
-
-instance {ix : Type u} {p q r : ix → Type u} : IFunctor (StateTransition p q) where
-  imap h := fun (i:ix) pk =>
-              match pk with
-              | StateTransition.STr pi qr => StateTransition.STr pi (ComposeNT qr h)
-
-#check StateTransition (@LockedIndex FileState0 FileState0 FileState0.FileOpen0)
-#check (StateTransition (@LockedIndex FileState0 Unit FileState0.FileOpen0) (@LockedIndex FileState0 Unit FileState0.FileClosed0))
-#check @LockedIndex Bool PUnit 
+instance : @IMonad ix IdentityX where
+  iskip := fun i pi => pi
+  iextend := fun pq ip pip => pq ip pip
 
 
-def FHF : (FileState0 → Type) → FileState0 → Type := (StateTransition (@LockedIndex FileState0 Unit FileState0.FileOpen0) (@LockedIndex FileState0 Unit FileState0.FileClosed0))
-
-inductive FH {ix : Type u} (f : (ix → Type u) → ix → Type u) (p : ix → Type u) : ix → Type u where
-| FHX : (x : f p i) → FH f p i
-
-#check (IdentityX IndexHolder true)
-#check @FH.FHX FileState0 IdentityX IndexHolder FileState0.FileOpen0 (IndexHolder.IDH FileState0.FileOpen0)
-#print PUnit
-
-instance {ix : Type u} {p : (ix → Type u) → ix → Type u} [IFunctor p]: IFunctor (@FH ix p) where
-  imap h := fun (i : ix) fhp =>
-              match fhp with 
-              | FH.FHX x => FH.FHX (IFunctor.imap h i x)
+inductive IndexLessThan (ixlt : Nat) : Nat → Type where
+| mk : (ix < ixlt) → IndexLessThan ixlt ix
 
 
 
---
--- free indexed monads from StackOverflow by Cirdec
---
+structure PredicatedValue (pred : Nat → Prop) : Type where
+    (val : Nat) (proof : pred val)
+    deriving Repr
 
-class Functor1 (f : ix → Type u → Type (u + 1)) where
-  fmap1 {a b : Type u} {i : ix} : (a → b) → f i a → f i b
+def LimitedUse (n : Nat) : Nat → Prop := (fun s => s < n)
+
+def ResourceUse (n : Nat) : Type := PredicatedValue (LimitedUse n)
+
+def CombineResourceUse (a : ResourceUse n) (b : ResourceUse m) : ResourceUse (n + m) :=
+    let h1 : a.val < n := a.proof
+    let h2 : b.val < m := b.proof
+    PredicatedValue.mk (a.val + b.val) (show (a.val + b.val < n + m) from Nat.add_lt_add h1 h2)
+
+def m1 := IdentityX ResourceUse 1
+def m2 := IdentityX ResourceUse 3
 
 
-inductive ActionF : (ix : List (Type u)) → (next : Type u) → Type (u+1) where
-  | Input {a : Type u} : (a → next) → ActionF [a] next
-  | Output : String → next → ActionF Nil next
+def bump1 (h : ResourceUse n) : ResourceUse (n+1) :=
+    PredicatedValue.mk (h.val + 1) (Nat.succ_lt_succ h.proof)
+
+def weaken' (h : ResourceUse n) {h2 : n <= m}: ResourceUse m :=
+    let pf₃ : h.val <  m := Nat.lt_of_lt_of_le h.proof h2
+    PredicatedValue.mk h.val pf₃
+
+def rBind (m1: IdentityX ResourceUse n) (m2 : IdentityX ResourceUse m) : IdentityX ResourceUse (n + m) :=
+  PredicatedValue.mk (m1.val + m2.val) (show m1.val+m2.val < n + m from Nat.add_lt_add m1.proof m2.proof)
+
+syntax "|↑" term : term
+macro_rules
+  | `(|↑ $t) => `(@weaken' _ _ $t (by simp))
+
+#check Exists.elim
 
 
-instance : Functor (ActionF ix) where
-  map f := fun x => open ActionF in
-             match x with
-             | Input nx => Input (fun ix => f (nx ix))
-             | Output s nx => Output s (f nx)
+#eval (|↑ (bump1 (PredicatedValue.mk 1 (show 1 < 2 by simp))) : ResourceUse 3)
+#print Bind
 
-instance : Functor1 ActionF where
-  fmap1 f := Functor.map f
-
-inductive FreeIx (f : List (Type u) → Type v → Type (u)) : List (Type u) → Type u → Type (u+1) where
-  | Return : a → FreeIx f [a] a
-  | Free : f i (FreeIx f j a) → FreeIx f (i ++ j) a
