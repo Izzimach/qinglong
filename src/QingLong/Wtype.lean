@@ -42,4 +42,44 @@ def W.dest : W P → P.obj (W P)
 def W.mk : P.obj (W P) → W P
 | ⟨a, f⟩ => ⟨a, f⟩
 
+-- typeclass to convert another type to/from a W-type
+class IsoW (f : Type → Type) where
+    pf : Type → pfunctor
+    toW : {α : Type} → f α → W (pf α)
+    fromW : {α : Type} → W (pf α) → f α
+
+
+inductive ListA (α : Type u) : Type u where
+    | Nil : ListA α
+    | Cons : α → ListA α
+
+instance : Functor ListA where
+    map f
+    | ListA.Nil => ListA.Nil
+    | ListA.Cons h => ListA.Cons (f h)
+
+def ListABranch : ListA α → Type
+    | ListA.Nil => Fin 0 -- can't use False since we need a Type here, not a Prop
+    | ListA.Cons _ => Unit
+
+def ListPF (α : Type) : pfunctor := pfunctor.mk (ListA α) ListABranch
+
+-- list as a W-type
+def ListW (α : Type) := W (ListPF α)
+
+-- convert list to a ListW
+def ListToW {α : Type} : (l : List α) → ListW α
+  | List.nil => ⟨ListA.Nil, Fin.elim0⟩
+  | List.cons h t => ⟨ListA.Cons h, (fun _ => ListToW t)⟩
+  
+def WToList {α : Type} : (lw : ListW α) → List α
+  | ⟨ListA.Nil, _⟩ => List.nil
+  | ⟨ListA.Cons h, f⟩ => List.cons h (WToList (f ()))
+
+instance : IsoW List where
+  pf := ListPF
+  toW := ListToW
+  fromW := WToList
+
+
 end Wtype
