@@ -67,6 +67,8 @@ instance : LawfulFunctor P.obj where
     comp_map  := @pfunctor.comp_map P
 
 
+-- A pfunctor stage with N branches. Useful to make (for example) rose trees in a W-type
+def listPF : pfunctor := pfunctor.mk Nat (fun n => Fin n)
 
 end pfunctor
 
