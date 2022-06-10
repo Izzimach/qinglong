@@ -62,12 +62,12 @@ inductive Collapser (m : Type → Type) : List (Type → Type) → Type 1 where
     | Cons : (∀x, t x → m x) → Collapser m effs → Collapser m (t :: effs)
 
 -- this is the annihilation of a sum type with a product type I always heard about
-def collapse {m : Type → Type} (c : Collapser m (f :: effs)) (ou : OU (f :: effs) x) : m x :=
+def collapse {x : Type} {m : Type → Type} {effs : List (Type → Type)} (c : Collapser m (effs)) (ou : OU (effs) x) : m x :=
     match c with
     | .Cons alg n =>
         match ou with
         | .Leaf l => alg x l
-        | @OU.Cons (f' :: effs') x _ ou => @collapse f' effs' x m n ou
+        | @OU.Cons effs' x _ ou' => collapse n ou'
 
 
 #check (Collapser.Cons (fun x v => pure (v : Id x)) (Collapser.Cons (fun x io => (io : IO x)) Collapser.End) : Collapser IO [Id, IO])
