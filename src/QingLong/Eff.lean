@@ -15,18 +15,7 @@ open openunion
 
 namespace effW
 
-namespace FixHack
 
-variable {α : Sort u} {C : α → Sort v} {r : α → α → Prop}
-
-unsafe def fix'.impl (hwf : WellFounded r) (F : ∀ x, (∀ y, r y x → C y) → C x) (x : α) : C x :=
-    F x fun y _ => impl hwf F y
-
-set_option codegen false in
-@[implementedBy fix'.impl]
-def fix' (hwf : WellFounded r) (F : ∀ x, (∀ y, r y x → C y) → C x) (x : α) : C x := hwf.fix F x
-
-end FixHack
 
 
 mutual
@@ -54,7 +43,7 @@ def snoc (q : Arrs r a γ) (f : γ → Eff r b) : Arrs r a b := Arrs.Node γ q (
 
 def append (q1 : Arrs r a x) (q2 : Arrs r x b) : Arrs r a b := Arrs.Node x q1 q2
 
-def send {v : Type} [HasEffect t r] : t v → Eff r v :=
+def send {v : Type} [HasEffect t effs] : t v → Eff effs v :=
     fun tv => Eff.Impure v (HasEffect.inject tv) (tsingleton Eff.Pure)
 
 end
