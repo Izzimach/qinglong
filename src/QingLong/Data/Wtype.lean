@@ -1,4 +1,4 @@
-import QingLong.PFunctor
+import QingLong.Data.PFunctor
 
 open pfunctor
 

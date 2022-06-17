@@ -2,11 +2,6 @@
 
 import Lean
 import Lean.Parser
-import QingLong.PFunctor
-import QingLong.Wtype
-import QingLong.FreeW
-import QingLong.Eff
-import QingLong.FixHack
 
 open Lean Elab Command Term Meta 
 open Parser.Term

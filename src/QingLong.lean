@@ -1,6 +1,6 @@
 
-import QingLong.OpenUnion
-import QingLong.FreerIxW
+import QingLong.Data.OpenUnion
+import QingLong.W.FreerIxW
 
 open openunion
 open FreerIxW

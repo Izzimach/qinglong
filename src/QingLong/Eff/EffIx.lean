@@ -6,9 +6,9 @@
 --
 
 
-import QingLong.PFunctor
-import QingLong.Wtype
-import QingLong.OpenUnion
+import QingLong.Data.PFunctor
+import QingLong.Data.Wtype
+import QingLong.Data.OpenUnion
 
 open pfunctor
 open Wtype

@@ -1,8 +1,8 @@
 -- Freer monads using W types and polynomial functors. Similar to FreeW, but we don't need a functor instance
 -- of the Monad and also don't compose pfunctors.
 
-import QingLong.PFunctor
-import QingLong.Wtype
+import QingLong.Data.PFunctor
+import QingLong.Data.Wtype
 
 open pfunctor
 open Wtype

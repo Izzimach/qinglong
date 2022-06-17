@@ -1,5 +1,5 @@
 import Lean
-import QingLong.IndexedMonad
+import QingLong.Data.IndexedMonad
 
 open IndexedMonad
 open IndexedMonad.IxMonad

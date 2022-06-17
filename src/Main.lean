@@ -1,7 +1,7 @@
 import QingLong
-import QingLong.PFunctor
-import QingLong.Wtype
-import QingLong.FreeW
+import QingLong.Data.PFunctor
+import QingLong.Data.Wtype
+import QingLong.W.FreeW
 
 open freeW
 open Wtype

@@ -1,7 +1,7 @@
 -- Free monads built using W types and polynomial functors
 
-import QingLong.PFunctor
-import QingLong.Wtype
+import QingLong.Data.PFunctor
+import QingLong.Data.Wtype
 
 open pfunctor
 open Wtype

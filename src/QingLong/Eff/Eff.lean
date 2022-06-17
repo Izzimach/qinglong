@@ -1,16 +1,12 @@
 -- extensible effect monad "Eff" based on "Free Monads, More Extensible Effects"
 -- built on top of the W type
 
-import QingLong.PFunctor
-import QingLong.Wtype
-import QingLong.OpenUnion
+import QingLong.Data.OpenUnion
 
 import Lean
 open Lean Elab Command Term --Meta
 
 
-open pfunctor
-open Wtype
 open openunion
 
 namespace effW
