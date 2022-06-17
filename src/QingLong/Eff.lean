@@ -145,19 +145,57 @@ def handleRelayS {effs : List (Type → Type)} {eff : Type → Type} {s : Type}
     termination_by handleRelayS e => 1
     decreasing_by sorry
 
+def replaceRelay {effs : List (Type → Type)} {eff eff': Type → Type} {α β : Type}
+  (handlePure : α → Eff (eff' :: effs) β)
+  (handleEff : ∀ γ, eff γ → Arr (eff' :: effs) γ β → Eff (eff' :: effs) β)
+  : Eff (eff :: effs) α -> Eff (eff' :: effs) β
+      | Eff.Pure x => handlePure x
+      | Eff.Impure e ou next =>
+            let k := qComp next (replaceRelay handlePure handleEff) 
+            match ou with
+            | OU.Leaf me => handleEff _ me k
+            | OU.Cons c => Eff.Impure _ (weaken c) (tsingleton k)
+    termination_by replaceRelay e => 1
+    decreasing_by sorry
+
+-- Alexis had this in freer-simple so we have it here too. Sometimes helps to infer types.
+def replaceRelayS {effs : List (Type → Type)} {eff eff': Type → Type} {α β s : Type}
+  (state : s)
+  (handlePure : s → α → Eff (eff' :: effs) β)
+  (handleEff : ∀ γ, s → eff γ → Arr (eff' :: effs) γ β → Eff (eff' :: effs) β)
+  : Eff (eff :: effs) α -> Eff (eff' :: effs) β
+      | Eff.Pure x => handlePure state x
+      | Eff.Impure e ou next =>
+            let k := qComp next (replaceRelayS state handlePure handleEff) 
+            match ou with
+            | OU.Leaf me => handleEff _ state me k
+            | OU.Cons c => Eff.Impure _ (weaken c) (tsingleton k)
+    termination_by replaceRelayS e => 1
+    decreasing_by sorry
+
 
 def interpretWith {effs : List (Type → Type)} {eff : Type → Type}
     (handleEff: ∀ γ, eff γ → (γ -> Eff effs β) -> Eff effs β)
     : Eff (eff :: effs) β → Eff effs β :=
         fun effVal => handleRelay pure handleEff effVal
 
-
 def interpret {effs : List (Type → Type)} {eff : Type → Type}
     (handleEff : ∀ γ, (eff γ → Eff effs γ))
     : Eff (eff :: effs) β → Eff effs β :=
         fun effVal => handleRelay pure (fun g ef next => (handleEff g ef) >>= next) effVal
 
-    
+-- transform from one effect to another, leaving the remaining effects unmodified
+def reinterpret {effs : List (Type → Type)} {eff eff' : Type → Type} {α : Type}
+  (reHandle : ∀ γ, eff γ → Eff (eff' :: effs) γ)
+  : Eff (eff :: effs) α → Eff (eff' :: effs) α
+  := replaceRelay pure (fun a f next => (reHandle a f) >>= next)
+
+-- transform from one effect to another, leaving the remaining effects unmodified
+def reinterpretS {effs : List (Type → Type)} {eff eff' : Type → Type} {α : Type}
+  (reHandle : ∀ γ, eff γ → Eff (eff' :: effs) γ)
+  : Eff (eff :: effs) α → Eff (eff' :: effs) α
+  := replaceRelay pure (fun a f next => (reHandle a f) >>= next)
+
 --
 -- Reader effect
 --
@@ -174,11 +212,12 @@ def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : E
     interpret (fun γ r => match r with 
                           | ReaderE.Ask => pure inp)
 
+/-
 def addGet : Nat → Eff [ReaderE Nat] Nat :=
     fun x => ask >>= fun i => pure (i+x)
 
 #eval run <| runReader 10 <| addGet 2
-
+-/
 
 --
 -- State effect

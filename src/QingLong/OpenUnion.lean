@@ -29,6 +29,8 @@ inductive OU : List (Type → Type) → Type → Type 1 where
     | Leaf : t x → OU (t :: effs) x
     | Cons : OU effs x → OU (t :: effs) x
 
+def weaken {effs : List (Type → Type)} {eff : Type → Type} (u : OU effs x) : OU (eff :: effs) x := OU.Cons u
+
 def asStringOU (ou : OU r α) : String :=
     match ou with
     | .Leaf l => "Leaf"

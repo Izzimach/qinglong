@@ -83,24 +83,6 @@ class IxMonad {ix : Type} (m : Indexer ix → Type → Type 1) where
 
 open IxMonad
 
-
-class XMonad {ix : Type} (n : Indexer ix → Type → Type 1) where
-  indexInj : Type → Type 1
-  toIndex : indexInj α → n i α
-  fromIndex : n i α → indexInj α
-
-class Sendable2 (b : Type → Type) (n : Type → Type 1) where
-  send : {x : Type} → (i : Indexer ix) → b x → n x
-  unpack : {x : Type} → (i : Indexer ix) → n x → Option (b x)
-
-
-class XMonad2 {ix : Type} (n : Type → Type 1) where
-  indexInj : Indexer ix → Type → Type 1
-  fromIndex : indexInj i α → n α
-  toIndex : n α → indexInj i α
-
-
-
 def getIndex {ix : Type} {i : Indexer ix} {n : Indexer ix → Type → Type 1} [Inhabited ix] [HAdd ix ix ix] : n i α → ix := 
     fun nia => evalIndexer i
 
@@ -112,26 +94,6 @@ instance [Inhabited ix] [HAdd ix ix ix]: IxMonad (@BothI ix) where
                                                      | BothI.Other o => BothI.Other o
                          | _ => BothI.Some (SomeI.B)
     getIx := fun f => getIndex f
-
-instance : XMonad (@BothI ix) where
-  indexInj := BothI0
-  toIndex := fun b0 => match b0 with
-                      | @BothI0.Some ix _ s i => BothI.Some s
-                      | BothI0.Other o i=> BothI.Other o
-  fromIndex := fun b => by rename_i i a
-                           match b with
-                           | BothI.Some s => apply BothI0.Some s i
-                           | BothI.Other o => apply BothI0.Other o i
-
-instance : @XMonad2 ix (@BothI0 ix) where
-  indexInj  := fun i a => @BothI ix i a
-  toIndex   := fun b0 => match b0 with
-                         | @BothI0.Some ix _ s i => BothI.Some s
-                         | BothI0.Other o i=> BothI.Other o
-  fromIndex := fun b => by rename_i i a 
-                           match b with
-                           | @BothI.Some ix i a s => apply BothI0.Some s i
-                           | BothI.Other o => apply BothI0.Other o i
 
 open Sendable
 
@@ -155,8 +117,7 @@ macro_rules
 | `($l:term →→  $r:term) => `(bindIx $l (fun _ => $r))
 
 
-def runBoth {n : Indexer Nat → Type → Type 1} [IxMonad n] [XMonad n] [Sendable SomeI n] : XMonad.indexInj n Nat:=
-    @XMonad.fromIndex Nat n _ _ Nat <|
+def runBoth {n : Indexer Nat → Type → Type 1} [IxMonad n]  [Sendable SomeI n] :=
        (sendNull <| SomeI.A ())
     →→ (sendNull <| (SomeI.B : SomeI Unit))
     →→ (sendIndex 2 (SomeI.A ()))
@@ -170,7 +131,7 @@ def runAuto {n : Indexer Nat → Type → Type 1} [IxMonad n] [Sendable SomeI n]
     →→ (pureIx .Null 3)
 
 
-#eval (@runBoth BothI _ _ _)
+#eval (@runBoth BothI _ _)
 #eval getIndex (@runAuto BothI _ _)
 
 #check elabTerm
