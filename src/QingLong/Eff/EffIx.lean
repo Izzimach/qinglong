@@ -16,6 +16,16 @@ open openunion
 
 namespace EffIx
 
+inductive Indexer (x : Type) : Type where
+  | Null : Indexer x
+  | Leaf : x → Indexer x
+  | Append : Indexer x → Indexer x → Indexer x
+
+def evalIndexer {ix : Type} [Inhabited ix] [HAdd ix ix ix] : (i : Indexer ix) → ix
+  | .Null => default
+  | .Leaf x => x
+  | .Append a b => evalIndexer a + evalIndexer b
+
 --
 -- ix should work like a Haskell Monoid. Here we used Inhabitied and HAdd for this functionality.
 --
@@ -34,22 +44,22 @@ def EffIxB {effs : List (Type → Type)} {α : Type} : EffIxA effs α → Type
 
 def EffIxPF (effs : List (Type → Type)) (α : Type) : pfunctor := pfunctor.mk (EffIxA effs α) (fun v => ULift <| EffIxB v)
 
-structure EffIxW {ix : Type} (effs : List (Type → Type)) (i : ix) (α : Type) : Type 1 where
+structure EffIxW {ix : Type} (effs : List (Type → Type)) (i : Indexer ix) (α : Type) : Type 1 where
    val : W (EffIxPF effs α)
 
 
 -- lift into Eff, explicitly specifying the index
-def sendEffIx {α : Type} {g : Type → Type} {effs : List (Type → Type)} [HasEffect g effs] {ix : Type} (i : ix) (ga : g α) : EffIxW effs i α :=
+def sendEffIx {α : Type} {g : Type → Type} {effs : List (Type → Type)} [HasEffect g effs] {ix : Type} (i : Indexer ix) (ga : g α) : EffIxW effs i α :=
     EffIxW.mk <| ⟨EffIxA.Impure α (HasEffect.inject ga), fun a => W.mk ⟨EffIxA.Pure <| ULift.down a, Fin.elim0 ∘ ULift.down⟩⟩
 
 -- lift into Eff. Use the default value for the monad index
-def sendEff {α : Type} {g : Type → Type} {effs : List (Type → Type)} [Inhabited ix] [HasEffect g effs] {ix : Type} (ga : g α) : EffIxW effs (@default ix) α := sendEffIx (@default ix) ga
+def sendEff {α : Type} {g : Type → Type} {effs : List (Type → Type)} [HasEffect g effs] {ix : Type} (ga : g α) := @sendEffIx α g effs _ ix Indexer.Null ga
 
 -- pure for Eff with explicit index
-def pureEffIx {α : Type} {ix : Type} (i : ix) (a : α) : EffIxW effs i α := EffIxW.mk ⟨EffIxA.Pure a, Fin.elim0 ∘ ULift.down⟩
+def pureEffIx {α : Type} {ix : Type} (i : Indexer ix) (a : α) : EffIxW effs i α := EffIxW.mk ⟨EffIxA.Pure a, Fin.elim0 ∘ ULift.down⟩
 
 -- Uses the default index for the monad
-def pureEff {α : Type} {ix : Type} [Inhabited ix] (a : α) : EffIxW effs (@default ix) α := pureEffIx (@default ix) a
+def pureEff {α : Type} {effs : List (Type → Type)} {ix : Type} (a : α) := @pureEffIx effs α ix Indexer.Null a
 
 
 def bindEffW {effs : List (Type → Type)} {α β : Type} : W (EffIxPF effs α) → (α → W (EffIxPF effs β)) → W (EffIxPF effs β) := fun m1 m2 =>
@@ -57,26 +67,20 @@ def bindEffW {effs : List (Type → Type)} {α β : Type} : W (EffIxPF effs α) 
     | ⟨EffIxA.Pure a,     _⟩ => m2 a
     | ⟨EffIxA.Impure x ou, bx⟩ => W.mk ⟨EffIxA.Impure x ou, fun x => (@bindEffW effs α β (bx x) m2)⟩
 
-def bindEff {α β ix : Type} [Indexer ix] {ix₁ ix₂ : ix}
-  : EffIxW g ix₁ α → (α → EffIxW g ix₂ β) → EffIxW g (Indexer.appendIx ix₁ ix₂) β := fun m1 m2 =>
+def bindEff {α β ix : Type} {ix₁ ix₂ : Indexer ix}
+  : EffIxW g ix₁ α → (α → EffIxW g ix₂ β) → EffIxW g (Indexer.Append ix₁ ix₂) β := fun m1 m2 =>
     -- we just strip off the FreerIxW wrapper and recurse
     EffIxW.mk <| bindEffW m1.val (fun x => (m2 x).val)
 
 
-inductive Indexer (x : Type) : Type where
-  | Null : Indexer x
-  | Leaf : x → Indexer x
-  | Append : Indexer x → Indexer x → Indexer x
 
-
-
-class IxMonad {ix : Type} [Indexer ix] (m : ix → Type → Type 1) where
-    pureIx : (i : ix) → α → m i α
-    bindIx [HAdd ix ix ix] : m i₁ α → (α → m i₂ β) → m (Indexer.appendIx i₁ i₂) β
+class IxMonad {ix : Type} (m : Indexer ix → Type → Type 1) where
+    pureIx : (i : Indexer ix) → α → m i α
+    bindIx : m i₁ α → (α → m i₂ β) → m (Indexer.Append i₁ i₂) β
 
 open IxMonad
 
-instance {ix : Type} [Indexer ix] : @IxMonad ix _ (EffIxW effs) where
+instance {ix : Type} : @IxMonad ix (EffIxW effs) where
     pureIx := fun i a => @pureEffIx effs _ ix i a
     bindIx := bindEff
 
@@ -86,7 +90,7 @@ instance {ix : Type} [Indexer ix] : @IxMonad ix _ (EffIxW effs) where
 -- EffIxW as a Functor
 --
 
-def EffIxMap {ix : Type} {i : ix} (f : α → β) (w : EffIxW effs i α) : EffIxW effs i β :=
+def EffIxMap {ix : Type} {i : Indexer ix} (f : α → β) (w : EffIxW effs i α) : EffIxW effs i β :=
     let Walg := fun d =>
         match d with
         | ⟨EffIxA.Pure a, z⟩         => W.mk ⟨EffIxA.Pure (f a), z⟩
@@ -100,7 +104,7 @@ instance : Functor (EffIxW effs i) :=
 
 -- Use the given collapser to convert an algebraic EffIxW monad into a static monad of type m. m is typically
 -- IO or StateIO s. For a pure result you could use Id for m.
-def interpretM {ix : Type} {i : ix} {α : Type} {m : Type → Type} [Monad m] (c : Collapser m effs) (tree : EffIxW effs i α) : m α :=
+def interpretM {ix : Type} {i : Indexer ix} {α : Type} {m : Type → Type} [Monad m] (c : Collapser m effs) (tree : EffIxW effs i α) : m α :=
     let Walg := fun zf =>
         match zf with
         | ⟨EffIxA.Pure a, _⟩ => ULift.up (pure a)
@@ -126,18 +130,18 @@ def collapseNamedState [StateOperator s n v] : ∀ x, NamedState n v x → State
     | .Put v' => fun s => pure ⟨(), StateOperator.putNamed n v' s⟩
 
 
-def getW (n : String) {ix v : Type} {effs : List (Type → Type)}
-  [Indexer ix] [HasEffect (NamedState n v) effs] : EffIxW effs (@Indexer.zeroIx ix _) v := sendEffIx (@Indexer.zeroIx ix _) <| @NamedState.Get n _
+def getW (n : String) {ix v : Type} {effs : List (Type → Type)} 
+    [HasEffect (NamedState n v) effs] : EffIxW effs (@Indexer.Null ix) v := sendEffIx (@Indexer.Null ix) <| @NamedState.Get n _
 
 def putW (n : String) {ix v : Type} (x : v) {effs : List (Type → Type)}
-  [Indexer ix] [HasEffect (NamedState n v) effs] : EffIxW effs (@Indexer.zeroIx ix _) Unit := sendEffIx (@Indexer.zeroIx ix _) <| @NamedState.Put n v x
+    [HasEffect (NamedState n v) effs] : EffIxW effs (@Indexer.Null ix) Unit := sendEffIx (@Indexer.Null ix) <| @NamedState.Put n v x
 
 #check HAppend
 
-def evalIx {effs : List (Type → Type)} {ix : Type} {i : ix} {α : Type} : EffIxW effs i α → ix := fun _ => i
+def evalIx {effs : List (Type → Type)} {ix : Type} [Inhabited ix] [HAdd ix ix ix] {i : Indexer ix} {α : Type} : EffIxW effs i α → ix := fun _ => evalIndexer i
 
 -- if you have the collapser you can provide it to evalIx in order to help typeclass inference
-def evalIxC {effs : List (Type → Type)} {ix : Type} {i : ix} {α : Type} (c : Collapser m effs) (w : EffIxW effs i α) : ix := evalIx w
+def evalIxC {effs : List (Type → Type)} {ix : Type} [Inhabited ix] [HAdd ix ix ix] {i : Indexer ix} {α : Type} (c : Collapser m effs) (w : EffIxW effs i α) : ix := evalIx w
 
 structure StateTag where (tag : Nat)
     deriving Repr
@@ -153,13 +157,10 @@ def rwCollapser {s : Type} [StateOperator s "tag" Nat] : Collapser (StateIO s) [
 
 def xCollapser := @rwCollapser StateTag _
 
-instance : Indexer Nat where
-    zeroIx := 0
-    appendIx := fun a b => a + b
-
   
-def xProg  {effs : List (Type → Type)} [Indexer Nat] [HasEffect (NamedState "tag" Nat) effs] :=
-    bindIx (bindIx (getW "tag") (fun x => @putW "tag" Nat Nat x effs _ _)) (fun _ => putW "tag" 3)
+def xProg {ix : Type} {i : Indexer ix} {effs : List (Type → Type)} [HasEffect (NamedState "tag" Nat) effs] :=
+    getW "tag"
+    --bindIx (bindIx (@getW "tag" ix Nat effs _) (fun x => putW "tag" 2)) (fun _ => @putW "tag" ix Nat 3 effs _)
 
 def x : StateIO StateTag Unit := (@interpretM _ _ _ Unit (StateIO StateTag) _ xCollapser <| xProg)
 

@@ -49,6 +49,7 @@ elab "mkFMonad" freeName:ident bindName:ident f:ident : command => do
         )
   elabCommand monadI
 
+
 elab "mkFreer" freeName:ident f:ident : command => do
   let mapName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "mapX"
   let bindName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "bindX"

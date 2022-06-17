@@ -240,5 +240,4 @@ def runState {α : Type} {effs : List (Type → Type)} {s : Type} (state : s) : 
     fun effVal => handleRelayS state (fun s x => pure (x,s)) stateGo effVal
 
 
-
 end effW
