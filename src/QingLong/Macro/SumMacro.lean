@@ -1,4 +1,5 @@
 import Lean
+import Lean.Parser.Term
 import QingLong.Data.IndexedMonad
 
 open IndexedMonad
@@ -7,53 +8,102 @@ open Lean Elab Command Term Meta
 
 
 
+class Prismatic (e : Type → Type) (u : Type → Type 1) where
+    inject : e α → u α
+    project : u α → Option (e α)
+
+def sumCtorName : Syntax → Syntax → Name := fun sumid subid => sumid.getId ++ Name.appendBefore subid.getId "select"
+
+def elabSumI (sumid : Syntax) (subids : Syntax.SepArray sep) : CommandElabM Unit := do
+  let subvals : Array Syntax := subids
+  let toCtor : Syntax → CommandElabM CtorView := 
+    fun subid => do
+      let ty ← `({x : Type} → $subid x → $sumid x)
+      pure { ref := default,
+              inferMod := false,
+              modifiers := default,
+              declName := sumCtorName sumid subid,
+              binders := Syntax.missing,
+              type? := ty
+              }
+  let subCtors : Array CtorView ← Array.sequenceMap subvals toCtor
+  let iv1 := { ref := default,
+               modifiers := {docString? := "argh"},
+               shortDeclName := sumid.getId,
+               declName      := sumid.getId,
+               levelNames := [],
+               binders := Syntax.missing,
+               type? := (← `(Type → Type 1)),
+               ctors := subCtors,
+               derivingClasses := #[]
+               }
+  let x := #[iv1]
+  elabInductiveViews x
+
+elab "mkSumI" sumid:ident " o: " subids:ident,+ ":∘" : command => elabSumI sumid subids
+
+
+
+def elabPrismatic (sumid : Syntax) (subid: Syntax) : CommandElabM Unit := do
+  let ctorName : Syntax := Lean.mkIdent <| sumCtorName sumid subid
+  let instanceCmd ←
+    `(instance  : Prismatic $subid $sumid where
+        inject := fun sx => $ctorName sx
+        project := fun bx => match bx with 
+                              | $ctorName sx => Option.some sx
+                              | _ => Option.none)
+  elabCommand instanceCmd
+
+elab "mkPrismatic" sumid:ident subid:ident : command => elabPrismatic sumid subid
+
+
+
+def elabCollapse (collapserid : Syntax) (collapsermonad : Syntax) (sumid : Syntax) (subids: Syntax.SepArray sep) (collapsers : Syntax.SepArray sep) : CommandElabM Unit := do
+  let evalBranch : (Syntax × Syntax) → CommandElabM Syntax := fun ⟨subval, collapser⟩ => do
+    let ctorName := Lean.mkIdent <| sumCtorName sumid subval
+    `(Parser.Term.matchAltExpr| | $ctorName x => $collapser x)
+  let branches ← Array.sequenceMap (Array.zip ↑subids collapsers) evalBranch
+  let cDef ← `(def $collapserid {α : Type} (sumVal : $sumid α) : $collapsermonad α := match sumVal with $branches:matchAlt*)
+  elabCommand cDef
+  logInfo "made collapser"
+
+elab "mkCollapser" collapserid:ident collapsermonad:ident sumid:ident subids:ident,+ " [: " collapsers:term,+ " :] " : command =>
+  elabCollapse collapserid collapsermonad sumid subids collapsers
+
+
+
 inductive SomeI (x : Type) : Type where
 | A : x → SomeI x
-| B : SomeI x
+| B : x → SomeI x
   deriving Repr
 
 inductive OtherI (y : Type) where
-| A 
+| A : y → OtherI y
 | C : y → y → OtherI y
   deriving Repr
 
-inductive BothI {ix : Type} (i : Indexer ix) (a : Type) : Type 1 where
-| Some : SomeI a → BothI i a
-| Other : OtherI a → BothI i a
-  deriving Repr
+mkSumI Argh o: SomeI,OtherI :∘
+mkPrismatic Argh SomeI
+mkPrismatic Argh OtherI
+mkCollapser blargh IO Argh SomeI,OtherI
+  [:
+    (fun s => match s with 
+               | SomeI.A z => pure z
+               | SomeI.B z => pure z),
+    (fun o => match o with
+               | OtherI.A y => pure y
+               | OtherI.C a b => pure b)
+  :]
 
-inductive BothI0 {ix : Type} (a : Type) : Type 1 where
-| Some : SomeI a → Indexer ix → BothI0 a
-| Other : OtherI a → Indexer ix → BothI0 a
-  deriving Repr
+def aVal : Argh Nat := Prismatic.inject <| SomeI.A 3
 
---#print SomeI.A
-
-instance [Inhabited ix] [HAdd ix ix ix]: IxMonad (@BothI ix) where
-    pureIx := fun i a => BothI.Some (SomeI.A a)
-    bindIx := fun m f => match m with
-                         | BothI.Some (SomeI.A x) => match f x with
-                                                     | BothI.Some s => BothI.Some s
-                                                     | BothI.Other o => BothI.Other o
-                         | _ => BothI.Some (SomeI.B)
-
-
-instance : SendableIx SomeI (@BothI ix) where
-  sendIx := fun sx => BothI.Some sx
-  unpackIx := fun bx => match bx with 
-                        | BothI.Some sx => Option.some sx
-                        | _ => Option.none
+#print Argh
+#check Argh.selectSomeI (SomeI.A 3)
+#check @Prismatic.inject SomeI Argh _ Nat (SomeI.A 3) 
+#check (Prismatic.inject (SomeI.A 3) : Argh Nat)
+#check blargh aVal
 
 
-
-
-def x {m : Indexer Nat → Type → Type 1} [IxMonad m] [SendableIx SomeI m] :=
-    checkIxDo m Nat Nat ∃>
-           (send <| SomeI.A ())
-        →→ (sendIndexed 2 (SomeI.A ()))
-        →→ (pureIx .Null 3)
-
-#eval getIndex (@x BothI _ _)
 
 def genCollapse (vals : List Syntax) : MetaM Syntax := do
     match vals with
@@ -73,49 +123,8 @@ elab "mkSumX " ts:ident,+ " ←| " : term => elabSumX ts
 
 #check mkSumX SomeI, OtherI ←|
 
-def z' := Term.mkConst `Nat.zero
-
-def zx : MetaM Expr := Meta.mkArrow (Lean.mkConst ``Nat) (Lean.mkConst ``String)
-
-def zz : Nat → String := fun _ => "argh"
 
 #eval `(Nat → String) >>= fun x => elabTerm x Option.none >>= fun z => liftMetaM (ppExpr z)
 
-open Lean.Elab.Term in
-def whnf' (e : TermElabM Syntax) (md := TransparencyMode.default) : TermElabM Format := do
-  let e ← elabTermAndSynthesize (← e) none
-  ppExpr (← whnf e)
 
-#eval whnf' `(List.cons "a" List.nil)
-
-def elabSumI (inid : Syntax) (ts : Syntax.SepArray sep) : CommandElabM Unit := do
-  let tsa : Array Syntax := ts
-  let bd ← `(null)
-  let c0 := { ref := default,
-              inferMod := false,
-              modifiers := default,
-              declName := "Blargh",
-              binders := Syntax.missing,
-              type? := (← `((x : Type) → SomeI x → $inid x))
-              }
-  let iv1 := { ref := default,
-               modifiers := {docString? := "argh"},
-               shortDeclName := inid.getId,
-               declName := inid.getId,
-               levelNames := [],
-               binders := Syntax.missing,
-               type? := (← `(Type → Type 1)),
-               ctors := #[c0],
-               derivingClasses := #[]
-               }
-  let x := #[iv1]
-  elabInductiveViews x
-  pure ()
-
-elab "mkSumI" inid:ident ts:ident,+ ":∘" : command => elabSumI inid ts
-
-mkSumI Argh SomeI :∘
-
-#print Argh
-#check Blargh (SomeI.A 3)
 

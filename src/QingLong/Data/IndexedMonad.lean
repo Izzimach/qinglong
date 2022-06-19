@@ -49,7 +49,6 @@ elab "checkIxDo" m:ident ix:ident a:ident " ∃> " monad:term : term => checkedD
 
 class SendableIx (b : Type → Type) (n : Indexer ix → Type → Type 1) where
   sendIx : {x : Type} → {i : Indexer ix} → b x → n i x
-  unpackIx : {x : Type} → {i : Indexer ix} → n i x → Option (b x)
 
 def send {m : Indexer ix → Type → Type 1} [SendableIx b m] : b α → m Indexer.Null α := 
   fun ba => @SendableIx.sendIx ix b m _ α Indexer.Null ba

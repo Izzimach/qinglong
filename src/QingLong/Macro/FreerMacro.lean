@@ -2,6 +2,8 @@
 import Lean
 import Lean.Parser
 
+import QingLong.Data.IndexedMonad
+
 open Lean Elab Command Term Meta 
 open Parser.Term
 
@@ -49,6 +51,21 @@ elab "mkFMonad" freeName:ident bindName:ident f:ident : command => do
         )
   elabCommand monadI
 
+elab "mkIxMonad" freeName:ident bindName:ident f:ident : command => do
+  let c1c : Syntax := Lean.mkIdent (freeName.getId ++ "Pure")
+  let c2c : Syntax := Lean.mkIdent (freeName.getId ++ "Impure")
+  let c1pat ← `(matchAltExpr| | $c1c a => f a)
+  let c2pat ← `(matchAltExpr| | $c2c fa next => $c2c fa (fun z => $bindName (next z) f))
+  let branches := #[c1pat,c2pat]
+  let bindF ← `(def $bindName {α β : Type} (m : $freeName α) (f : α → $freeName β) : $freeName β := match m with $branches:matchAlt*)
+  elabCommand bindF
+  let monadI ←
+    `(instance : IxMonad $freeName where
+        pureIx := $c1c
+        bindIx := $bindName
+        )
+  elabCommand monadI
+
 
 elab "mkFreer" freeName:ident f:ident : command => do
   let mapName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "mapX"
@@ -67,3 +84,13 @@ mkFreer SomeFreer Id
 #print SomeFreer
 #check (do SomeFreer.Pure (); SomeFreer.Pure 4 : SomeFreer Nat)
 #print Bind
+
+
+
+
+def x {m : Indexer Nat → Type → Type 1} [IxMonad m] [SendableIx SomeI m] :=
+    checkIxDo m Nat Nat ∃>
+           (send <| SomeI.A ())
+        →→ (sendIndexed 2 (SomeI.A ()))
+        →→ (pureIx .Null 3)
+

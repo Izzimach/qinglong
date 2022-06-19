@@ -173,15 +173,6 @@ def runX : StateTag → StateIO StateTag Unit → IO Nat :=
 #eval evalIxC xCollapser xProg
 
 
--- can't use normal do notation, so we make up a separate syntax for indexed monads
-
-syntax:60 term:60 " →→= " term:61 : term   -- >>= for indexed monads
-syntax:60 term:60 " →→ " term:61 : term   -- >>  for indexed monads
-
-macro_rules
-| `($l:term →→= $r:term) => `(bindIx $l $r)
-| `($l:term →→ $r:term) => `(bindIx $l (fun _ => $r))
-
 -- run the monad and output result
 #eval runX {tag := 2} <| interpretM xCollapser <| getW →→= putW →→ putW 3 →→ getW →→= putW
 
