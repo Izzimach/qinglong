@@ -11,7 +11,7 @@ open Lean Elab Command Term Meta
 open Parser.Term
 
 open IndexedMonad
-
+open SumMacro
 
 set_option hygiene false in
 macro "mkFreerInductive" freerName:ident f:ident : command =>

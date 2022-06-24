@@ -6,6 +6,7 @@ open IndexedMonad
 open IndexedMonad.IxMonad
 open Lean Elab Command Term Meta 
 
+namespace SumMacro
 
 
 class Prismatic (e : Type → Type) (u : Type → Type v) where
@@ -40,7 +41,7 @@ def elabSumI (sumid : Syntax) (subids : Syntax.SepArray sep) : CommandElabM Unit
     let x := #[iv1]
     elabInductiveViews x
 
-elab "mkSumI" sumid:ident " o: " subids:ident,+ ":∘" : command => elabSumI sumid subids
+elab "mkSumI" sumid:ident " o: " subids:ident,+ ":o" : command => elabSumI sumid subids
 
 
 
@@ -82,7 +83,7 @@ inductive OtherI (y : Type) where
   | C : y → y → OtherI y
     deriving Repr
 
-mkSumI Argh o: SomeI,OtherI :∘
+mkSumI Argh o: SomeI,OtherI :o
 mkPrismatic Argh SomeI
 mkPrismatic Argh OtherI
 mkCollapser blargh IO Argh SomeI,OtherI
@@ -125,3 +126,5 @@ elab "mkSumX " ts:ident,+ " ←| " : term => elabSumX ts
 #check mkSumX SomeI, OtherI ←|
 
 #eval `(Nat → String) >>= fun x => elabTerm x Option.none >>= fun z => liftMetaM (ppExpr z)
+
+end SumMacro
