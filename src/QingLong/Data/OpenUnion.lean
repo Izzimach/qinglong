@@ -72,7 +72,7 @@ def collapse {x : Type} {m : Type → Type} {effs : List (Type → Type)} (c : C
         | @OU.Cons effs' x _ ou' => collapse n ou'
 
 
-#check (Collapser.Cons (fun x v => pure (v : Id x)) (Collapser.Cons (fun x io => (io : IO x)) Collapser.End) : Collapser IO [Id, IO])
+--#check (Collapser.Cons (fun x v => pure (v : Id x)) (Collapser.Cons (fun x io => (io : IO x)) Collapser.End) : Collapser IO [Id, IO])
 
 
 def genCollapse (vals : List Syntax) : MetaM Syntax := do
@@ -93,18 +93,6 @@ elab "mkCollapse " ts:term,+ " o> " : term => elabCollapse ts
     (fun x v  => pure (v : Id x)) ,
     (fun x io => (io : IO x))
     o>
-
-def StateIO (sType : Type) (α : Type) : Type := sType → IO (α × sType)
-
-instance : Monad (StateIO s) where
-    pure := fun a s => pure ⟨a, s⟩
-    bind := fun m f s => do let ⟨a', s'⟩ ← m s
-                            f a' s'
-
-class StateOperator (stateContainer : Type) (name : String) (state : Type) where
-    putNamed : state → stateContainer → stateContainer
-    getNamed : stateContainer → state
-
 
 
 

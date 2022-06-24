@@ -38,7 +38,7 @@ def checkedDo (m : Syntax) (ix : Syntax) (a : Syntax) (monad : Syntax) : TermEla
   let elabResult ← elabTerm pureAdd Option.none
   let mType ← inferType elabResult
   --logInfo mType
-  logInfo elabResult
+  --logInfo elabResult
   --pure mType
   pure elabResult
 
@@ -56,6 +56,7 @@ def send {m : Indexer ix → Type → Type 1} [SendableIx b m] : b α → m Inde
 def sendIndexed {m : Indexer ix → Type → Type 1} [SendableIx b m] : (i : ix) → b α → m (Indexer.Leaf i) α := 
   fun i ba => @SendableIx.sendIx ix b m _ α (Indexer.Leaf i) ba
 
-
+def pure0 {m :Indexer ix → Type → Type 1} [IxMonad m] : α → m Indexer.Null α :=
+  fun a => IxMonad.pureIx Indexer.Null a
 
 end IndexedMonad
