@@ -223,8 +223,10 @@ inductive StateE (s : Type) : Type → Type where
     | Get : StateE s s
     | Put : s → StateE s Unit
 
-def get [HasEffect (StateE s) effs]              : Eff effs s   := send StateE.Get
-def put [HasEffect (StateE s) effs] (putVal : s) : Eff effs Unit := send <| StateE.Put putVal
+def get [HasEffect (StateE s) effs]              : Eff effs s
+    := send StateE.Get
+def put [HasEffect (StateE s) effs] (putVal : s) : Eff effs Unit
+    := send <| StateE.Put putVal
 
 
 def stateGo {s : Type}  (γ : Type) (state : s) (eff : StateE s γ) (next : s → Arr effs γ (α × s)) : Eff effs (α × s) := 
