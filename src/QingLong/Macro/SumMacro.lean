@@ -15,15 +15,57 @@ class Prismatic (e : Type → Type) (u : Type → Type v) where
 
 def sumCtorName : Syntax → Syntax → Name := fun sumid subid => sumid.getId ++ Name.appendBefore subid.getId "select"
 
+partial
+def compileSubId : Syntax → Name := fun subterm =>
+    match subterm with
+    | .missing => "missing_"
+    | .node info kind args =>
+        if kind == strLitKind
+        then compileSubId args[0]
+        else if kind == ``Lean.Parser.Term.paren
+        then compileSubId args[1]
+        else if kind == ``Lean.Parser.Term.app
+        then
+            let fName := compileSubId args[0]
+            let argNames := compileSubId args[1]
+            fName ++ argNames
+        else if args.size > 0
+        then Array.foldl (fun x y => 
+                              let y' := compileSubId y
+                              if x == ""
+                              then compileSubId y
+                              else if y' == "null"
+                              then x
+                              else x ++ y') "" args
+        else if kind == `null
+        then "null"
+        else toString kind
+    | .atom info val => val
+    | .ident info rawVal val _ => val
+ 
+def sumCtorName2 : Syntax → Syntax → Name := fun sumid subterm => sumid.getId ++ Name.appendAfter (compileSubId subterm) "select"
+
+/-
+elab "bawk" someid:term : command => do
+    logInfo someid.getKind
+    if someid.getKind == ``Lean.Parser.Term.paren
+    then logInfo <| toString someid.getArgs[1]
+    logInfo <| toString someid.getArgs[0]
+    logInfo <| compileSubId  someid
+
+bawk (NamedState "z" Nat)
+#eval sumCtorName2 (Syntax.mkStrLit "z")
+-/
+
 def elabSumI (sumid : Syntax) (subids : Syntax.SepArray sep) : CommandElabM Unit := do
     let subvals : Array Syntax := subids
     let toCtor : Syntax → CommandElabM CtorView := 
-      fun subid => do
-        let ty ← `({x : Type} → $subid x → $sumid x)
+      fun subterm => do
+        let ty ← `({x : Type} → $subterm x → $sumid x)
         pure { ref := default,
                 inferMod := false,
                 modifiers := default,
-                declName := sumCtorName sumid subid,
+                declName := sumCtorName2 sumid subterm,
                 binders := Syntax.missing,
                 type? := ty
                 }
@@ -41,90 +83,78 @@ def elabSumI (sumid : Syntax) (subids : Syntax.SepArray sep) : CommandElabM Unit
     let x := #[iv1]
     elabInductiveViews x
 
-elab "mkSumI" sumid:ident " o: " subids:ident,+ ":o" : command => elabSumI sumid subids
+elab "mkSumI" sumid:ident " o: " subids:term,+ ":o" : command => elabSumI sumid subids
 
 
 
-def elabPrismatic (sumid : Syntax) (subid: Syntax) : CommandElabM Unit := do
-    let ctorName : Syntax := Lean.mkIdent <| sumCtorName sumid subid
+def elabPrismatic (sumid : Syntax) (subterm: Syntax) : CommandElabM Unit := do
+    let ctorName : Syntax := Lean.mkIdent <| sumCtorName2 sumid subterm
     let instanceCmd ←
-      `(instance  : Prismatic $subid $sumid where
+      `(instance  : Prismatic $subterm ($sumid) where
           inject := fun sx => $ctorName sx
           project := fun bx => match bx with 
                                 | $ctorName sx => Option.some sx
                                 | _ => Option.none)
     elabCommand instanceCmd
 
-elab "mkPrismatic" sumid:ident subid:ident : command => elabPrismatic sumid subid
+elab "mkPrismatic" sumid:ident subid:term : command => elabPrismatic sumid subid
+
+elab "mkSumType" sumid:ident " >| "subids:term,+ " |< " : command => do
+    elabSumI sumid subids
+    let mkP := fun subterm => elabPrismatic sumid subterm
+    Array.forM mkP (subids : Array Syntax)
 
 
-
-def elabCollapse (collapserid : Syntax) (collapsermonad : Syntax) (sumid : Syntax) (subids: Syntax.SepArray sep) (collapsers : Syntax.SepArray sep) : CommandElabM Unit := do
-    let evalBranch : (Syntax × Syntax) → CommandElabM Syntax := fun ⟨subval, collapser⟩ => do
-      let ctorName := Lean.mkIdent <| sumCtorName sumid subval
-      `(Parser.Term.matchAltExpr| | $ctorName x => $collapser x)
+def elabCollapse (collapsertarget : Syntax) (sumid : Syntax) (subids: Syntax.SepArray sep) (collapsers : Syntax.SepArray sep) : TermElabM Expr := do
+    let evalBranch : (Syntax × Syntax) → TermElabM Syntax := fun ⟨subval, collapser⟩ => do
+        let ctorName := Lean.mkIdent <| sumCtorName2 sumid subval
+        `(Parser.Term.matchAltExpr| | $ctorName x => $collapser x)
     let branches ← Array.sequenceMap (Array.zip ↑subids collapsers) evalBranch
-    let cDef ← `(def $collapserid {α : Type} (sumVal : $sumid α) : $collapsermonad α := match sumVal with $branches:matchAlt*)
-    elabCommand cDef
-    logInfo "made collapser"
+    let collapserFunc ← `(fun {α : Type} (sumVal : $sumid α) => (match sumVal with $branches:matchAlt* : $collapsertarget α))
+    elabTerm collapserFunc Option.none
 
-elab "mkCollapser" collapserid:ident collapsermonad:ident sumid:ident subids:ident,+ " [: " collapsers:term,+ " :] " : command =>
-    elabCollapse collapserid collapsermonad sumid subids collapsers
+elab "buildCollapser" collapsermonad:ident sumid:ident subids:term,+ " [: " collapsers:term,+ " :] " : term =>
+    elabCollapse collapsermonad sumid subids collapsers
 
-
-
-inductive SomeI (x : Type) : Type where
-  | A : x → SomeI x
-  | B : x → SomeI x
-    deriving Repr
 
 inductive OtherI (y : Type) where
   | A : y → OtherI y
   | C : y → y → OtherI y
     deriving Repr
 
-mkSumI Argh o: SomeI,OtherI :o
-mkPrismatic Argh SomeI
+inductive EcksI (x : Type) (y : Type) where
+| X : x → y → EcksI x y
+
+/-
+mkSumI Argh o: (EcksI Nat),OtherI :o
+mkPrismatic Argh (EcksI Nat)
 mkPrismatic Argh OtherI
-mkCollapser blargh IO Argh SomeI,OtherI
+-/
+
+mkSumType Argh >| EcksI Nat, OtherI |<
+
+def collapserArgh := buildCollapser IO Argh (EcksI Nat),OtherI
     [:
       (fun s => match s with 
-                | SomeI.A z => pure z
-                | SomeI.B z => pure z),
+                | EcksI.X x y => pure y),
       (fun o => match o with
                 | OtherI.A y => pure y
                 | OtherI.C a b => pure b)
     :]
 
-def aVal : Argh Nat := Prismatic.inject <| SomeI.A 3
+namespace x
 
-#print Argh
-#check Argh.selectSomeI (SomeI.A 3)
-#check @Prismatic.inject SomeI Argh _ Nat (SomeI.A 3) 
-#check (Prismatic.inject (SomeI.A 3) : Argh Nat)
+open Prismatic
+
+def aVal : Argh Nat := inject <| EcksI.X 3 4
+
+/-#print Argh
+#check Argh.EcksI.Natselect (EcksI.X 3 4)
+#check @Prismatic.inject (EcksI Nat) Argh _ Nat (EcksI.X 3 5) 
+#check (Prismatic.inject (EcksI.X 3 7) : Argh Nat)
 #check blargh aVal
+-/
 
-
-
-def genCollapse (vals : List Syntax) : MetaM Syntax := do
-    match vals with
-    | List.cons h t => let pt ← genCollapse t
-                       `(List.cons $h $pt)
-    | List.nil      => `(List.nil)
-
-def elabSumX (ts : Syntax.SepArray sep) : TermElabM Expr := do
-    let tsa : Array Syntax := ts
-    logInfo "argh"
-    match tsa with
-    | Array.mk vals => let collapseStx ← (genCollapse vals)
-                       elabTerm collapseStx Option.none
-
-elab "mkSumX " ts:ident,+ " ←| " : term => elabSumX ts
-
-
-
-#check mkSumX SomeI, OtherI ←|
-
-#eval `(Nat → String) >>= fun x => elabTerm x Option.none >>= fun z => liftMetaM (ppExpr z)
+end x
 
 end SumMacro

@@ -13,6 +13,7 @@ open Parser.Term
 open IndexedMonad
 open SumMacro
 
+
 set_option hygiene false in
 macro "mkFreerInductive" freerName:ident f:ident : command =>
   `(inductive $freerName {ix : Type} (i : Indexer ix) (α : Type u) : Type (u + 1) where 
@@ -86,12 +87,24 @@ elab "mkSendableIx" freeName:ident f:ident : command => do
         sendIx := fun v => $c2c (Prismatic.inject v) $c1c)
   elabCommand cd
 
+elab "mkInterpreter" freeName:ident sumName:ident interpretName:ident : command => do
+  let c1c : Syntax := Lean.mkIdent (freeName.getId ++ "Pure")
+  let c2c : Syntax := Lean.mkIdent (freeName.getId ++ "Impure")
+  let c1pat ← `(matchAltExpr| | $c1c a => pure a)
+  let c2pat ← `(matchAltExpr| | $c2c v next => bind (c v) (fun xx => $interpretName (next xx) c))
+  let branches := #[c1pat,c2pat]
+  let cd ←
+    `(def $interpretName {ix α : Type} {i : Indexer ix} (m : $freeName i α) {n : Type → Type} (c : {z : Type} → $sumName z → n z) [Monad n] : n α :=
+        match m with $branches:matchAlt*)
+  elabCommand cd
+  
 
 elab "mkFreer" freeName:ident f:ident : command => do
   let mapName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "mapX"
   let bindName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "bindX"
   let bindIxName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "bindXX"
   let reindexName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "reindexX"
+  let interpreterName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "_interpret"
   let m1 ← `(mkFreerInductive $freeName $f)
   elabCommand m1
   let m2 ← `(mkFmap $freeName $mapName $f)
@@ -104,6 +117,9 @@ elab "mkFreer" freeName:ident f:ident : command => do
   elabCommand m5
   let m6 ← `(mkSendableIx $freeName $f)
   elabCommand m6
+  let m7 ← `(mkInterpreter $freeName $f $interpreterName)
+  elabCommand m7
+
 
 /-
 mkFreerInductive SomeFreer Id
@@ -113,28 +129,30 @@ mkFMonad SomeFreer bindY Id
 mkIxMonad SomeFreer bindIxY reindexIxY Id
 mkSendableIx SomeFreer Argh
 -/
-
+/-
 mkFreer SomeFreer Argh
 #print SomeFreer
-
+#check SomeFreer_interpret
 
 #check (do SomeFreer.Pure (); SomeFreer.Pure 4 : SomeFreer Indexer.Null Nat)
-#check (Prismatic.inject (SomeI.A 3) : Argh Nat)
-#check (send (SomeI.A 3) : SomeFreer _ _)
+#check (Prismatic.inject (EcksI.X  3 7) : Argh Nat)
+#check (send (EcksI.X 1 3) : SomeFreer _ _)
+
+
 
 open IxMonad
 
 def x {m : Indexer Nat → Type → Type 1}
-  [IxMonad m] [SendableIx SomeI m] :=
+  [IxMonad m] [SendableIx (EcksI Nat) m] :=
     checkIxDo m Nat Nat ∃>
-           (send <| SomeI.A ())
-        →→ (sendIndexed 2 (SomeI.A ()))
+           (send <| EcksI.X 1 1)
+        →→ (sendIndexed 2 (EcksI.X 22 ()))
         →→ (pure0 3)
 
 def runSome := @x SomeFreer
 
 #check runSome
 #eval getIndex runSome
-
+-/
 
 end FreerIx

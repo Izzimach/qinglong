@@ -60,16 +60,23 @@ def elabSI (structid : Syntax) (vals : Syntax.SepArray sep) : CommandElabM Unit 
 elab "mkStateInterfaces" structid:ident vals:structfield,+ " @@ " : command => elabSI structid vals
 
 elab "mkStateIO" stateIOname:ident vals:structfield,+ " @@ " : command => do
-  let structid : Syntax := Lean.mkIdent <| Name.appendAfter stateIOname.getId "struct"
-  elabSS structid vals
-  elabSI structid vals
-  let siodef ← `(def $stateIOname := StateIO $structid)
-  elabCommand siodef
+    let structid : Syntax := Lean.mkIdent <| Name.appendAfter stateIOname.getId "struct"
+    elabSS structid vals
+    elabSI structid vals
+    let siodef ← `(def $stateIOname := StateIO $structid)
+    elabCommand siodef
+    let c ←
+        `(instance : Monad $stateIOname where
+              pure := fun a s => pure ⟨a, s⟩
+              bind := fun m f s => do let ⟨a', s'⟩ ← m s
+                                      f a' s')
+    elabCommand c
+
+
+--mkStateIOStruct Blargh (z:Nat),(y:String) @@
+--mkStateInterfaces Blargh (z:Nat),(y:String) @@
 
 /-
-mkStateIOStruct Blargh (z:Nat),(y:String) @@
-mkStateInterfaces Blargh (z:Nat),(y:String) @@
-
 mkStateIO Blargh (z:Nat),(y:String) @@
 
 def testStruct : Blarghstruct := { z := 3, y := "argh"}
