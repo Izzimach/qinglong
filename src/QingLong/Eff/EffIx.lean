@@ -143,7 +143,7 @@ def evalIx {effs : List (Type → Type)} {ix : Type} [Inhabited ix] [HAdd ix ix 
 -- if you have the collapser you can provide it to evalIx in order to help typeclass inference
 def evalIxC {effs : List (Type → Type)} {ix : Type} [Inhabited ix] [HAdd ix ix ix] {i : Indexer ix} {α : Type} (c : Collapser m effs) (w : EffIxW effs i α) : ix := evalIx w
 
-structure StateTag where (tag : Nat)
+/-structure StateTag where (tag : Nat)
     deriving Repr
 
 instance : StateOperator StateTag "tag" Nat where
@@ -179,3 +179,4 @@ def runX : StateTag → StateIO StateTag Unit → IO Nat :=
 -- should count # of putW's in the monad
 #eval evalIxC xCollapser <| getW →→= putW →→ getW →→= putW →→ putW 3
 
+-/
