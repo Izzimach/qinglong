@@ -8,21 +8,13 @@ open SumMacro
 open FreerIx
 open IndexedMonad
 
-mkStateIO OneState (z:Nat) @@
+mkStateIO OneState (z:Nat), (y:String) @@
 #check StateIO
 #check OneState Nat
 
 mkSumType ExampleCommand >| (NamedState "z" Nat), IO |<
 
-def blargh := buildCollapser OneState ExampleCommand (NamedState "z" Nat),IO
-    [:
-      -- NamedState "z" Nat
-      collapseNamedState "z" Nat,
-      -- IO
-      collapseIO
-    :]
-
-mkFreer ExampleMonad ExampleCommand
+mkFreer ExampleMonad ExampleCommand Nat
 
 def incZ {ix : Type} {m : Indexer ix → Type → Type 1} [SendableIx (NamedState "z" Nat) m] [IxMonad m] :=
   show m _ Nat from   --checkIxDo m ix Nat ∃>
@@ -33,7 +25,19 @@ def incZ {ix : Type} {m : Indexer ix → Type → Type 1} [SendableIx (NamedStat
 #check (incZ : ExampleMonad _ Nat)
 
 
-def gork := ExampleMonad_interpret (@incZ Nat _ _ _) blargh {z := 3}
+def interpreter := buildCollapser OneState ExampleCommand (NamedState "z" Nat),IO
+    [:
+      -- NamedState "z" Nat
+      collapseNamedState "z" Nat,
+      -- IO
+      collapseIO
+    :]
+
+def gork := ExampleMonad_interpret
+              incZ -- code
+              interpreter
+              {z := 3, y := "Argh"} -- initial state
+
 
 #check gork
 #reduce gork
