@@ -124,15 +124,15 @@ def mkInterpreterFunc (freeName : Syntax) (sumName : Syntax) (interpretName : Sy
   let c1c : Syntax := Lean.mkIdent (freeName.getId ++ "Pure")
   let c2c : Syntax := Lean.mkIdent (freeName.getId ++ "Impure")
   let c1pat ← `(matchAltExpr| | $c1c a => pure a)
-  let c2pat ← `(matchAltExpr| | $c2c v next => bind (c v) (fun xx => $interpretName (next xx) c))
+  let c2pat ← `(matchAltExpr| | $c2c v next => bind (c v) (fun xx => $interpretName c (next xx)))
   let branches := #[c1pat,c2pat]
   let cd ←
     match oix with
     | Option.none =>
-          `(def $interpretName {ix α : Type} {i : Indexer ix} (m : $freeName i α) {n : Type → Type} (c : {z : Type} → $sumName z → n z) [Monad n] : n α :=
+          `(def $interpretName {ix α : Type} {i : Indexer ix}  {n : Type → Type} [Monad n] (c : {z : Type} → $sumName z → n z) (m : $freeName i α) : n α :=
               match m with $branches:matchAlt*)
     | Option.some ix =>
-          `(def $interpretName {   α : Type} {i : Indexer $ix} (m : $freeName i α) {n : Type → Type} (c : {z : Type} → $sumName z → n z) [Monad n] : n α :=
+          `(def $interpretName {   α : Type} {i : Indexer $ix} {n : Type → Type} [Monad n] (c : {z : Type} → $sumName z → n z) (m : $freeName i α) : n α :=
               match m with $branches:matchAlt*)
   elabCommand cd
   
@@ -142,7 +142,7 @@ def mkFreerFunc (freeName : Syntax) (f : Syntax) (oix : Option Syntax) : Command
   let bindName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "bindX"
   let bindIxName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "bindXX"
   let reindexName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "reindexX"
-  let interpreterName : Syntax := Lean.mkIdent <| Name.mkSimple <| freeName.getId.toString ++ "_interpret"
+  let interpreterName : Syntax := Lean.mkIdent <| Name.mkSimple <| "run" ++ freeName.getId.toString
   let m1 ← match oix with
            | Option.none    => `(mkFreerInductive $freeName $f)
            | Option.some ix => `(mkFreerInductiveWithIndex $freeName $f $ix)

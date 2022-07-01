@@ -113,9 +113,11 @@ def elabCollapse (collapsertarget : Syntax) (sumid : Syntax) (subids: Syntax.Sep
     let collapserFunc ← `(fun {α : Type} (sumVal : $sumid α) => (match sumVal with $branches:matchAlt* : $collapsertarget α))
     elabTerm collapserFunc Option.none
 
-elab "buildCollapser" collapsermonad:ident sumid:ident subids:term,+ " [: " collapsers:term,+ " :] " : term =>
-    elabCollapse collapsermonad sumid subids collapsers
+elab "buildInterpreter" commandtype:ident targetmonad:ident subids:term,+ " [: " collapsers:term,+ " :] " : term =>
+    elabCollapse targetmonad commandtype subids collapsers
 
+/-
+namespace x
 
 inductive OtherI (y : Type) where
   | A : y → OtherI y
@@ -124,16 +126,16 @@ inductive OtherI (y : Type) where
 
 inductive EcksI (x : Type) (y : Type) where
 | X : x → y → EcksI x y
-
+-/
 /-
 mkSumI Argh o: (EcksI Nat),OtherI :o
 mkPrismatic Argh (EcksI Nat)
 mkPrismatic Argh OtherI
--/
+
 
 mkSumType Argh >| EcksI Nat, OtherI |<
 
-def collapserArgh := buildCollapser IO Argh (EcksI Nat),OtherI
+def collapserArgh := buildInterpreter Argh IO (EcksI Nat),OtherI
     [:
       (fun s => match s with 
                 | EcksI.X x y => pure y),
@@ -142,11 +144,13 @@ def collapserArgh := buildCollapser IO Argh (EcksI Nat),OtherI
                 | OtherI.C a b => pure b)
     :]
 
-namespace x
 
 open Prismatic
 
 def aVal : Argh Nat := inject <| EcksI.X 3 4
+end x
+
+-/
 
 /-#print Argh
 #check Argh.EcksI.Natselect (EcksI.X 3 4)
@@ -154,7 +158,5 @@ def aVal : Argh Nat := inject <| EcksI.X 3 4
 #check (Prismatic.inject (EcksI.X 3 7) : Argh Nat)
 #check blargh aVal
 -/
-
-end x
 
 end SumMacro

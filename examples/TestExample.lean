@@ -20,12 +20,13 @@ def incZ {ix : Type} {m : Indexer ix → Type → Type 1} [SendableIx (NamedStat
   show m _ Nat from   --checkIxDo m ix Nat ∃>
         getNamed "z"
     →→= fun b => putNamed "z" (b+1)
-    →→  pure0 3
+    →→  pure0 6004
 
 #check (incZ : ExampleMonad _ Nat)
+#eval getIndex (incZ : ExampleMonad _ Nat)
 
 
-def interpreter := buildCollapser OneState ExampleCommand (NamedState "z" Nat),IO
+def interpreter1 := buildInterpreter ExampleCommand OneState (NamedState "z" Nat),IO
     [:
       -- NamedState "z" Nat
       collapseNamedState "z" Nat,
@@ -33,9 +34,8 @@ def interpreter := buildCollapser OneState ExampleCommand (NamedState "z" Nat),I
       collapseIO
     :]
 
-def gork := ExampleMonad_interpret
+def gork := runExampleMonad interpreter1
               incZ -- code
-              interpreter
               {z := 3, y := "Argh"} -- initial state
 
 
