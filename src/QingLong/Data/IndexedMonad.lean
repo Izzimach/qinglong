@@ -1,5 +1,4 @@
 import Lean
-import QingLong.Data.StateIO
 
 open Lean Elab Command Term Meta 
 
@@ -64,15 +63,5 @@ def sendIndexed {m : Indexer ix → Type → Type 1} [SendableIx b m] : (i : ix)
 
 def pure0 {m :Indexer ix → Type → Type 1} [IxMonad m] : α → m Indexer.Null α :=
   fun a => IxMonad.pureIx Indexer.Null a
-
-def getNamedIx (n : String) {ix v : Type} {m : Indexer ix → Type → Type 1} [SendableIx (NamedState n v) m] 
-  : m (@Indexer.Null ix) v :=
-    @send ix (NamedState n v) v m _ <| @NamedState.Get n _
-
-def putNamedIx (n : String) {ix v : Type} (x : v) {m : Indexer ix → Type → Type 1} [SendableIx (NamedState n v) m]
-  : m (@Indexer.Null ix) Unit :=
-    @send ix (NamedState n v) Unit m _ <| @NamedState.Put n v x
-
-
 
 end IndexedMonad
