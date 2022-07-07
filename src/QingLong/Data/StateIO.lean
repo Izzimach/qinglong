@@ -2,16 +2,35 @@ import Lean
 import Lean.Parser.Command
 import Lean.Parser.Term
 
-import QingLong.Data.IndexedMonad
+/-
+ A general monad to use as the target for a collapser.
+ Usually when running algebraic effects, the monads you end up with are IO and
+ maybe some state. So you can build your collapser to produce a StateIO.
 
--- A general monad to use as the target for a collapser.
--- Usually when running algebraic effects, the monads you end up with are IO and
--- maybe some state. So you can build your collapser to produce a StateIO.
+ To use:
+
+ > mkStateIO Blargh (z:Nat),(y:String) @@
+
+ Makes a datatype of type "StateIO Blarghstruct" where Blarghstruct is a struct with fields { z:Nat, y:String }
+
+ You'll also need to make a sum type and freer monad (or some equivalent construct):
+
+ > mkSumType ExampleCommand >| (NamedState "z" Nat), IO |<
+ > mkFreer ExampleMonad ExampleCommand
+
+ Then in the collapser you can use "collapseNamedState" for example:
+
+ > def interpreter1 := buildInterpreter ExampleCommand OneState (NamedState "z" Nat),IO
+ >   [:
+ >     collapseNamedState "z" Nat,
+ >     collapseIO
+ >   :]
+
+-/
 
 namespace StateIO
 
 open Lean Elab Command Term Meta 
-open IndexedMonad
 
 def StateIO (sType : Type) (α : Type) : Type := sType → IO (α × sType)
 
@@ -101,13 +120,5 @@ def collapseNamedState (n : String) (v : Type) [StateOperator s n v] {α : Type}
 
 def collapseIO : IO α → StateIO ss α :=
     fun o => fun s => Functor.map (fun x => ⟨x,s⟩) o
-
-def getNamed (n : String) {ix v : Type} {m : Indexer ix → Type → Type 1} [SendableIx (NamedState n v) m] 
-  : m (@Indexer.Null ix) v :=
-    @send ix (NamedState n v) v m _ <| @NamedState.Get n _
-
-def putNamed (n : String) {ix v : Type} (x : v) {m : Indexer ix → Type → Type 1} [SendableIx (NamedState n v) m]
-  : m (@Indexer.Null ix) Unit :=
-    @send ix (NamedState n v) Unit m _ <| @NamedState.Put n v x
 
 end StateIO

@@ -1,13 +1,9 @@
 import Lean
 import Lean.Parser.Term
-import QingLong.Data.IndexedMonad
 
-open IndexedMonad
-open IndexedMonad.IxMonad
 open Lean Elab Command Term Meta 
 
 namespace SumMacro
-
 
 class Prismatic (e : Type → Type) (u : Type → Type v) where
     inject : e α → u α

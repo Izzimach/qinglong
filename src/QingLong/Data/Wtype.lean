@@ -3,6 +3,7 @@ import QingLong.Data.PFunctor
 open pfunctor
 
 -- Contains the basic W type "W_type" as well as "W" which builds a W-type using a polynomial functor P
+-- Copied from lean mathlib 3
 
 universe u
 

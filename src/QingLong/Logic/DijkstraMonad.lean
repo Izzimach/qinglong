@@ -1,7 +1,9 @@
 universe u v
 
 --
--- a simple monad along with a proof that the monad returns a specific value
+-- Model of Dijkstra monads, which combine a base monad (usually representing code) with a second
+-- monad that is a predicate or prop/proof about the monad behavior.  This monad product is represented by
+-- "MonadWithPredicate"
 --
 
 structure BaseMonad (α : Type) where

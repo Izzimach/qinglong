@@ -1,5 +1,9 @@
 -- extensible effect monad "Eff" based on "Free Monads, More Extensible Effects"
--- built on top of the W type
+--
+-- Most of this is converted from the freer-simple library by Alexis King.
+-- Many recursive functions aren't shown to be well-founded, so use with caution.
+--
+-- The monad is built on "Eff effs α" where effs is a list of effects supported by this monad.
 
 import QingLong.Data.OpenUnion
 
@@ -56,7 +60,7 @@ macro_rules
 
 
 
-
+-- O(n) dequeue to put/get monads
 inductive ViewLL (r : List (Type → Type)) : Type → Type → Type 1 where
     | VOne : (a → Eff r b) → ViewLL r a b
     | VCons : (e : Type) → (a → (Eff r) e) → Arrs r e b → ViewLL r a b
@@ -87,6 +91,7 @@ def qApp (q : Arrs r β w) (x : β) : Eff r w :=
 -- Note this also modifies the stack of effects, and is used in handlers.
 def qComp (g : Arrs effs a b) (h : Eff effs b → Eff effs' c) : Arr effs' a c :=
     h ∘ qApp g
+
 
 instance : Monad (Eff r) where
     pure := Eff.Pure
@@ -208,12 +213,6 @@ def runReader {α : Type} {effs : List (Type → Type)} {i : Type} (inp : i) : E
     interpret (fun γ r => match r with 
                           | ReaderE.Ask => pure inp)
 
-/-
-def addGet : Nat → Eff [ReaderE Nat] Nat :=
-    fun x => ask >>= fun i => pure (i+x)
-
-#eval run <| runReader 10 <| addGet 2
--/
 
 --
 -- State effect

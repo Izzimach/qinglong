@@ -136,47 +136,7 @@ def getW (n : String) {ix v : Type} {effs : List (Type → Type)}
 def putW (n : String) {ix v : Type} (x : v) {effs : List (Type → Type)}
     [HasEffect (NamedState n v) effs] : EffIxW effs (@Indexer.Null ix) Unit := sendEffIx (@Indexer.Null ix) <| @NamedState.Put n v x
 
-#check HAppend
-
 def evalIx {effs : List (Type → Type)} {ix : Type} [Inhabited ix] [HAdd ix ix ix] {i : Indexer ix} {α : Type} : EffIxW effs i α → ix := fun _ => evalIndexer i
 
 -- if you have the collapser you can provide it to evalIx in order to help typeclass inference
 def evalIxC {effs : List (Type → Type)} {ix : Type} [Inhabited ix] [HAdd ix ix ix] {i : Indexer ix} {α : Type} (c : Collapser m effs) (w : EffIxW effs i α) : ix := evalIx w
-
-/-structure StateTag where (tag : Nat)
-    deriving Repr
-
-instance : StateOperator StateTag "tag" Nat where
-    putNamed := fun n s => {s with tag := n}
-    getNamed := fun s => s.tag
-
-def rwCollapser {s : Type} [StateOperator s "tag" Nat] : Collapser (StateIO s) [NamedState "tag" Nat] :=
-    mkCollapse
-      @collapseNamedState s "tag" Nat _
-      o>
-
-def xCollapser := @rwCollapser StateTag _
-
-  
-def xProg {ix : Type} {i : Indexer ix} {effs : List (Type → Type)} [HasEffect (NamedState "tag" Nat) effs] :=
-    getW "tag"
-    --bindIx (bindIx (@getW "tag" ix Nat effs _) (fun x => putW "tag" 2)) (fun _ => @putW "tag" ix Nat 3 effs _)
-
-def x : StateIO StateTag Unit := (@interpretM _ _ _ Unit (StateIO StateTag) _ xCollapser <| xProg)
-
-def runX : StateTag → StateIO StateTag Unit → IO Nat :=
-  fun x s => do let ⟨a,s'⟩ ← s x
-                pure s'.tag
-
-#eval runX {tag := 2} x
-
-#eval evalIxC xCollapser xProg
-
-
--- run the monad and output result
-#eval runX {tag := 2} <| interpretM xCollapser <| getW →→= putW →→ putW 3 →→ getW →→= putW
-
--- should count # of putW's in the monad
-#eval evalIxC xCollapser <| getW →→= putW →→ getW →→= putW →→ putW 3
-
--/
