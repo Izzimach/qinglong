@@ -2,23 +2,39 @@ import Lean
 import Lean.Parser.Command
 import Lean.Parser.Term
 
+namespace NamedState
+
+open Lean Elab Command Term Meta 
+
+
+--
+-- A monad to read/write from multiples state variables, using string lookup.
+--
+
+inductive NamedState (n : String) (v : Type) : Type → Type where
+  | Get : NamedState n v v
+  | Put : v → NamedState n v Unit
+  
 /-
  A general monad to use as the target for a collapser.
  Usually when running algebraic effects, the monads you end up with are IO and
- maybe some state. So you can build your collapser to produce a StateIO.
+ some state. So you can build your collapser to produce a StateIO which handles both of these cases.
 
- To use:
-
- > mkStateIO Blargh (z:Nat),(y:String) @@
-
- Makes a datatype of type "StateIO Blarghstruct" where Blarghstruct is a struct with fields { z:Nat, y:String }
-
- You'll also need to make a sum type and freer monad (or some equivalent construct):
+ Lets' say you have a sum type and freer monad or some equivalent construct. Here we make a freer monad with
+ two effects, (NamedState "z" Nat α) and (IO α)
 
  > mkSumType ExampleCommand >| (NamedState "z" Nat), IO |<
  > mkFreer ExampleMonad ExampleCommand
 
- Then in the collapser you can use "collapseNamedState" for example:
+ This has two sendable instances, IO and (NamedState "z" Nat).
+
+ To interpret this we make a StateIO monad as the final target monad:
+
+ > mkStateIO Blargh (z:Nat),(y:String) @@
+
+ this makes a datatype of type "StateIO Blarghstruct" where Blarghstruct is a struct with fields { z:Nat, y:String }
+
+ Then in the interpreter you can use "collapseNamedState" for example:
 
  > def interpreter1 := buildInterpreter ExampleCommand OneState (NamedState "z" Nat),IO
  >   [:
@@ -28,9 +44,6 @@ import Lean.Parser.Term
 
 -/
 
-namespace StateIO
-
-open Lean Elab Command Term Meta 
 
 def StateIO (sType : Type) (α : Type) : Type := sType → IO (α × sType)
 
@@ -105,12 +118,6 @@ def goP [StateOperator Blarghstruct "z" Nat] : Blarghstruct → Nat := fun b => 
 #eval goP testStruct
 -/
 
---
--- A monad/effect to read and write from the StateIO.
---
-inductive NamedState (n : String) (v : Type) : Type → Type where
-  | Get : NamedState n v v
-  | Put : v → NamedState n v Unit
 
 def collapseNamedState (n : String) (v : Type) [StateOperator s n v] {α : Type} : NamedState n v α → StateIO s α :=
   fun m =>
@@ -121,4 +128,4 @@ def collapseNamedState (n : String) (v : Type) [StateOperator s n v] {α : Type}
 def collapseIO : IO α → StateIO ss α :=
     fun o => fun s => Functor.map (fun x => ⟨x,s⟩) o
 
-end StateIO
+end NamedState
