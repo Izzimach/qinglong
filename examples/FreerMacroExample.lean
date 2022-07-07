@@ -20,6 +20,11 @@ def incZ {m : Type → Type 1} [Sendable (NamedState "z" Nat) m] [Monad m] : m N
     putNamed "z" (z+1)
     pure 3
 
+def exampleX [Monad m] [Sendable IO m] [Sendable (NamedState "x" Nat) m]: m Nat := do
+    putNamed "x" 4
+    Sendable.send <| IO.println 3
+    pure 3
+
 
 -- A monad with two state variables and IO
 
