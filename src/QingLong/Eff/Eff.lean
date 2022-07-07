@@ -11,7 +11,7 @@ import Lean
 open Lean Elab Command Term --Meta
 
 
-open openunion
+open OpenUnion
 
 namespace Eff
 

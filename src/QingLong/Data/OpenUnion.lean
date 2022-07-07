@@ -8,7 +8,7 @@
 import Lean
 open Lean Elab Command Term Meta
 
-namespace openunion
+namespace OpenUnion
 
 class ShowEff (t : Type → Type) where
     effString : String
@@ -96,4 +96,4 @@ elab "mkCollapse " ts:term,+ " o> " : term => elabCollapse ts
 
 
 
-end openunion
+end OpenUnion

@@ -9,10 +9,12 @@
 import QingLong.Data.PFunctor
 import QingLong.Data.Wtype
 import QingLong.Data.OpenUnion
+import QingLong.Data.NamedState
 
 open pfunctor
 open Wtype
-open openunion
+open OpenUnion
+open NamedState
 
 namespace EffIx
 
@@ -117,17 +119,6 @@ def interpretM {ix : Type} {i : Indexer ix} {α : Type} {m : Type → Type} [Mon
 
 
 
-
-
-inductive NamedState (n : String) (v : Type) : Type → Type where
-  | Get : NamedState n v v
-  | Put : v → NamedState n v Unit
-
-def collapseNamedState [StateOperator s n v] : ∀ x, NamedState n v x → StateIO s x :=
-  fun x m =>
-    match m with
-    | .Get => fun s => pure ⟨StateOperator.getNamed n s,s⟩
-    | .Put v' => fun s => pure ⟨(), StateOperator.putNamed n v' s⟩
 
 
 def getW (n : String) {ix v : Type} {effs : List (Type → Type)} 
