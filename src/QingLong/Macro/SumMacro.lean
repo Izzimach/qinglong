@@ -5,12 +5,23 @@ open Lean Elab Command Term Meta
 
 namespace SumMacro
 
+-- The Prismatic class lets you move between a sum type and its subtypes
+-- For instance if you had a sum type X := A | B then
+--  > inject goes from A → X or B → X
+--  > project goes from X → Option A or X → Option B
 class Prismatic (e : Type → Type) (u : Type → Type v) where
     inject : e α → u α
     project : u α → Option (e α)
 
-def sumCtorName : Syntax → Syntax → Name := fun sumid subid => sumid.getId ++ Name.appendBefore subid.getId "select"
-
+-- Given a sum type we need a way to label each branch of the sum type.
+-- For example given X := A | B we need to generate contructors for A and B.
+-- For normal sum types these are usually Left and Right, but one reason to use
+-- macros is so that the names are a little more readable.
+-- Typically the subtype name is just the name of the subtype, assuming
+-- the subtype is just an identifier indicating some type. However, you can
+-- actually pass in an expression as a subtype. We need a way to generate
+-- an ID for that expression that is (mostly) unique and also repeatable
+-- for that expression (thus we can't just generate random names).
 partial
 def compileSubId : Syntax → Name := fun subterm =>
     match subterm with
@@ -18,13 +29,17 @@ def compileSubId : Syntax → Name := fun subterm =>
     | .node info kind args =>
         if kind == strLitKind
         then compileSubId args[0]
+        -- ignore parenthesis
         else if kind == ``Lean.Parser.Term.paren
         then compileSubId args[1]
+        -- for parameterized types we merge the function and its argument
         else if kind == ``Lean.Parser.Term.app
         then
             let fName := compileSubId args[0]
             let argNames := compileSubId args[1]
             fName ++ argNames
+        -- if we didn't handle the term already we just punt and try
+        -- to fold together all the sub nodes, ignoring null or empty values
         else if args.size > 0
         then Array.foldl (fun x y => 
                               let y' := compileSubId y
@@ -39,20 +54,11 @@ def compileSubId : Syntax → Name := fun subterm =>
     | .atom info val => val
     | .ident info rawVal val _ => val
  
+
 def sumCtorName2 : Syntax → Syntax → Name := fun sumid subterm => sumid.getId ++ Name.appendAfter (compileSubId subterm) "select"
 
-/-
-elab "bawk" someid:term : command => do
-    logInfo someid.getKind
-    if someid.getKind == ``Lean.Parser.Term.paren
-    then logInfo <| toString someid.getArgs[1]
-    logInfo <| toString someid.getArgs[0]
-    logInfo <| compileSubId  someid
-
-bawk (NamedState "z" Nat)
-#eval sumCtorName2 (Syntax.mkStrLit "z")
--/
-
+-- to generate the sum type we basically need to generate constructors for each subtype
+-- and then tie it all together with an inductive view.
 def elabSumI (sumid : Syntax) (subids : Syntax.SepArray sep) : CommandElabM Unit := do
     let subvals : Array Syntax := subids
     let toCtor : Syntax → CommandElabM CtorView := 
@@ -66,19 +72,21 @@ def elabSumI (sumid : Syntax) (subids : Syntax.SepArray sep) : CommandElabM Unit
                 type? := ty
                 }
     let subCtors : Array CtorView ← Array.sequenceMap subvals toCtor
-    let iv1 := { ref := default,
-                  modifiers := {docString? := "argh"},
-                  shortDeclName := sumid.getId,
-                  declName      := sumid.getId,
-                  levelNames := [],
-                  binders := Syntax.missing,
-                  type? := (← `(Type → Type 1)),
-                  ctors := subCtors,
-                  derivingClasses := #[]
-                  }
-    let x := #[iv1]
-    elabInductiveViews x
+    let indView := {
+        ref := default,
+        modifiers := {docString? := "argh"},
+        shortDeclName := sumid.getId,
+        declName      := sumid.getId,
+        levelNames := [],
+        binders := Syntax.missing,
+        type? := (← `(Type → Type 1)),
+        ctors := subCtors,
+        derivingClasses := #[]
+        }
+    elabInductiveViews #[indView]
 
+-- you can make the sum type directly using mkSumI but typically you use
+-- mkSumType which also generates prismatic instances
 elab "mkSumI" sumid:ident " o: " subids:term,+ ":o" : command => elabSumI sumid subids
 
 
@@ -95,10 +103,12 @@ def elabPrismatic (sumid : Syntax) (subterm: Syntax) : CommandElabM Unit := do
 
 elab "mkPrismatic" sumid:ident subid:term : command => elabPrismatic sumid subid
 
+
 elab "mkSumType" sumid:ident " >| "subids:term,+ " |< " : command => do
     elabSumI sumid subids
     let mkP := fun subterm => elabPrismatic sumid subterm
     Array.forM mkP (subids : Array Syntax)
+
 
 
 def elabCollapse (collapsertarget : Syntax) (sumid : Syntax) (subids: Syntax.SepArray sep) (collapsers : Syntax.SepArray sep) : TermElabM Expr := do
