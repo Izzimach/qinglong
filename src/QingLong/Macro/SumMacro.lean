@@ -104,7 +104,7 @@ def elabPrismatic (sumid : Syntax) (subterm: Syntax) : CommandElabM Unit := do
 elab "mkPrismatic" sumid:ident subid:term : command => elabPrismatic sumid subid
 
 
-elab "mkSumType" sumid:ident " >| "subids:term,+ " |< " : command => do
+elab "mkSumType" sumid:ident " >| " subids:term,+ " |< " : command => do
     elabSumI sumid subids
     let mkP := fun subterm => elabPrismatic sumid subterm
     Array.forM mkP (subids : Array Syntax)

@@ -1,16 +1,19 @@
 
-import Lean
-import Lean.Parser
-
 -- we need to instantiate a Sendable instance for getNamed/putNamed
 import QingLong.Data.NamedState
+-- for the Prismatic class
+import QingLong.Macro.SumMacro
 
-namespace Freer
+import Lean
+import Lean.Parser
 
 open Lean Elab Command Term Meta 
 open Parser.Term
 
-open NamedState
+open NamedState SumMacro
+
+namespace Freer
+
 
 
 set_option hygiene false in
@@ -51,9 +54,9 @@ def mkFMonadFunc (freerName : Syntax) (bindName : Syntax) (f :Syntax) : CommandE
   let bindDecl ← `(def $bindName {α β : Type} (m : $freerName α) (f : α → $freerName β) : $freerName β := $matchTerm)
   elabCommand bindDecl
   let monadI ←
-            `(instance : Monad $freerName where
-                pure := $c1c
-                bind := $bindName)
+      `(instance : Monad $freerName where
+          pure := $c1c
+          bind := $bindName)
   elabCommand monadI
 
 elab "mkFMonad" freerName:ident bindName:ident f:ident : command => mkFMonadFunc freerName bindName f
@@ -62,6 +65,8 @@ elab "mkFMonad" freerName:ident bindName:ident f:ident : command => mkFMonadFunc
 class Sendable (b : Type → Type) (m : Type → Type 1) where
   send : {x : Type} → b x → m x
 
+-- Sometimes getNamed has trouble inferring the type of the variable you are getting. You can help it out
+-- with an  explicit call. For instance to get a Nat named "z" : @getNamed "z" Nat _ _
 def getNamed (n : String) {v : Type} {m : Type → Type 1} [Sendable (NamedState n v) m] : m v :=
     Sendable.send <| @NamedState.Get n v
 
@@ -92,8 +97,8 @@ def mkInterpreterFunc (freerName : Syntax) (sumName : Syntax) (interpretName : S
 def mkFreerFunc (freerName : Syntax) (f : Syntax) : CommandElabM Unit := do
   let mapName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "mapX"
   let bindName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "bindX"
-  let bindIxName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "bindXX"
-  let reindexName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "reindexX"
+  --let bindIxName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "bindXX"
+  --let reindexName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "reindexX"
   let interpreterName : Syntax := Lean.mkIdent <| Name.mkSimple <| "run" ++ freerName.getId.toString
   let m1 ← `(mkFreerInductive $freerName $f)
   elabCommand m1
