@@ -56,6 +56,9 @@ class StateOperator (stateContainer : Type) (name : String) (state : Type) where
     putS : state → stateContainer → stateContainer
     getS : stateContainer → state
 
+-- Normally a state monad has a single variable that you access using get/put.
+-- This builds a structure representing state, with several fields in it. Each field "x"
+-- is a single state that is accessed using put x/get x.
 set_option hygiene false in
 def elabSS (structid : Syntax) (vals : Syntax.SepArray sep) : CommandElabM Unit := do
     let valArray : Array Syntax := vals
@@ -75,10 +78,12 @@ syntax " ( " ident " : " term " ) " : structfield
 
 elab "mkStateIOStruct" structid:ident vals:structfield,+ " @@ " : command => elabSS structid vals
 
+-- This makes instances of StateOperator for a particular state container (a structure) and a named
+-- field of that structure. There should be an instance generated for each field of the structure.
 set_option hygiene false in
-def elabSI (structid : Syntax) (vals : Syntax.SepArray sep) : CommandElabM Unit := do
-  let valArray : Array Syntax := vals
-  let valInstance : Syntax → CommandElabM Unit :=
+def elabSI (structid : Syntax) (fields : Syntax.SepArray sep) : CommandElabM Unit := do
+  let fieldArray : Array Syntax := fields
+  let fieldInstance : Syntax → CommandElabM Unit :=
     fun n => do
       let id := n.getArgs[1]
       let ftype := n.getArgs[3]
@@ -87,10 +92,16 @@ def elabSI (structid : Syntax) (vals : Syntax.SepArray sep) : CommandElabM Unit 
                   putS := fun v s => { s with $id:ident := v}
                   getS := fun s => s.$id)
       elabCommand c
-  Array.forM valInstance valArray
+  Array.forM fieldInstance fieldArray
 
 elab "mkStateInterfaces" structid:ident vals:structfield,+ " @@ " : command => elabSI structid vals
 
+-- Makes a complete set of definitions for a StateIO monad, including:
+--  A structure with fields to hold all the named states
+--  Instances of StateOperator to get/put state
+--  A Monad instance
+-- You provide the monad name and field names/types.  For a StateIO monad named "x" there is also
+-- a State structure named "xstruct" which you can use.
 elab "mkStateIO" stateIOname:ident vals:structfield,+ " @@ " : command => do
     let structid : Syntax := Lean.mkIdent <| Name.appendAfter stateIOname.getId "struct"
     elabSS structid vals
@@ -119,12 +130,16 @@ def goP [StateOperator Blarghstruct "z" Nat] : Blarghstruct → Nat := fun b => 
 -/
 
 
+-- When running the interpreter for a Freer monad that has one or more named state, you typically collapse
+-- the monad into a StateIO monad.  For each effect that is a NamedState you can use collapseNamedState.
 def collapseNamedState (n : String) (v : Type) [StateOperator s n v] {α : Type} : NamedState n v α → StateIO s α :=
   fun m =>
     match m with
     | .Get => fun s => pure ⟨StateOperator.getS n s,s⟩
     | .Put v' => fun s => pure ⟨(), StateOperator.putS n v' s⟩
 
+-- When running the interpreter for a Freer monad that has one or more named state, you typically collapse
+-- the monad into a StateIO monad.  If you have an effect that represents arbitrary IO you can collapse it with collapseIO.
 def collapseIO : IO α → StateIO ss α :=
     fun o => fun s => Functor.map (fun x => ⟨x,s⟩) o
 
