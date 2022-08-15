@@ -10,6 +10,8 @@ import QingLong.Macro.FreerMacro
 open Lean Elab Expr Command Meta Term
 open Freer
 
+#check evalExpr
+
 namespace Deconstruct
 
 def spaceN (n : Nat) : String := String.mk <| List.replicate n ' '
@@ -56,77 +58,6 @@ def walkExpr (thing : Syntax) : TermElabM Expr := do
   --logInfo <| thingExpr
   pure <| Lean.mkConst `Nat.zero
 
-inductive MonadSequence (t : Type) where
-| Error : String → MonadSequence t
-| Empty
-| Pure : (α : Type) → α → MonadSequence t
-| Command : t → MonadSequence t 
-| Bind : MonadSequence t → MonadSequence t → MonadSequence t
-| NonDet : MonadSequence t → MonadSequence t → MonadSequence t
-| Label : String → MonadSequence t → MonadSequence t
-| Recurse : String → MonadSequence t
-
-class MaybeRepr (x : Type) where
-   mRepr : x → Nat → Format
-
-def dumpMS [Repr t] : MonadSequence t → Nat → Format
-    | .Error s, p => "Error " ++ s
-    | .Empty, _   => "Empty"
-    | .Pure α a, p => "Pure"
-    | .Command c, p => "Command " ++ reprPrec c p
-    | .Bind l r, p => "" ++ dumpMS l (p+1) ++ " >>= " ++ dumpMS r (p+1) ++ ""
-    | .NonDet l r, p => "(" ++ dumpMS l p ++ " -|- " ++ dumpMS r p ++ ")"
-    | .Label l s , p => "Label " ++ l ++ " (" ++ dumpMS s p ++ ")"
-    | .Recurse l, p => "Recurse " ++ l
-
-instance [Repr t] : Repr (MonadSequence t) where
-    reprPrec := dumpMS
-
-
-def mqError (targetType : Expr) (s : String) : Expr := Lean.mkAppN (Lean.mkConst ``MonadSequence.Error) #[targetType, Lean.mkStrLit s]
-def mqCommand (targetType : Expr) (s : String) : Expr := Lean.mkAppN (Lean.mkConst ``MonadSequence.Command) #[targetType, Lean.mkStrLit s]
-
--- Dirty beta-reduce. We try to beta reduce functions, with the expectation that some
--- expressions will be malformed since we may not have all the information we need.
-def dirtyBR (targetType : Expr) (funcBody : Expr) (argStack : List Expr) (offset : Nat) : Expr :=
-    match funcBody with
-    | bvar ix _ => @Option.getD Expr (argStack.get? (offset - ix)) (mqError targetType "bad bound variable")
-    | app f arg z => Expr.app (dirtyBR targetType f argStack offset) (dirtyBR targetType arg argStack offset) z
-    | lam n e c z => Expr.lam n e (dirtyBR targetType c argStack (offset + 1)) z
-    | x => x
-
-def i1 : Expr := (Lean.mkConst ``IO)
-
--- compare two monads to see if they match except for the result type
--- i.e., meq (IO Nat) (IO Unit) is true
-def monadEq : Expr → Expr → MetaM Bool := fun t1 t2 =>
-    match (t1,t2) with
-    | (app f1 _ _, app f2 _ _) => isDefEq f1 f2
-    | _ => pure false
-
--- given a parameterized type, strip off the last parameter so it's (Type → Type)
--- and compare to a monad type that is already of the form Type → Type
-def monadMatch : Expr → Expr → MetaM Bool := fun t m =>
-    match t with
-    | app m2 _ _ => isDefEq m m2
-    | forallE n a b _ => monadMatch b m
-    | _ => pure false
-
--- Checks if some type is one of the monad types in the provided list. If it is, returns some
--- Expr value. If not, returns Option.none
--- So if the list was t := [⟨IO,"IO"⟩,⟨Free Id,"Free"⟩] then
---   > checkAgainstMonads (IO a) t => Option.some "IO"
---   > checkAgainstMonads Nat t    => Option.none
---   > checkAgainstMonads (Free Id Nat) t => Option.some "Free"
-def checkAgainstMonads : Expr → List (Expr × Expr) → MetaM (Option Expr) := fun t l =>
-    match l with
-    | List.nil => pure Option.none
-    | List.cons head tail => do
-        let m ← monadMatch t head.1
-        if m
-        then pure (Option.some head.2)
-        else do
-            checkAgainstMonads t tail
 
 -- The forall value in a type is basically an argument: forall x (forall y z) is "x → y → z"
 -- This takes the set of nested foralls and breaks them into a list of argument types
@@ -140,126 +71,139 @@ def isMatchCall : Name → Bool := fun n =>
     | Option.none => false
     | Option.some v => String.isPrefixOf "match_" v.toString
 
-def listToNonDet (targetType : Expr) (l :List Expr) : Expr :=
-    match l with
-    | List.nil => Lean.mkApp (Lean.mkConst ``MonadSequence.Empty) targetType
-    | List.cons h List.nil => h
-    | List.cons h t => Lean.mkAppN (Lean.mkConst ``MonadSequence.NonDet) #[targetType, h, listToNonDet targetType t]
 
-partial
-def breakApp (sendTransforms : List (Expr × Expr)) (targetType : Expr) (argStack : List Expr) (callStack : List Name) (appExpr : Expr) (recDepthLeft : Nat) : TermElabM Expr := do
-    if recDepthLeft == 0
-    then pure <| mqError targetType "recursion depth limit exceeded"
-    else
-    match appExpr with
-    | app f arg _ => breakApp sendTransforms targetType (arg :: argStack) callStack f (recDepthLeft - 1)
-    | lam _ _ body _ =>
-        let peBody := dirtyBR targetType body argStack 0
-        --goExpr peBody 0
-        breakApp sendTransforms targetType argStack callStack peBody (recDepthLeft - 1)
-    | bvar ix _ => pure <| Option.getD (argStack.get? ix) (mqError targetType "bad bound variable")
-    | letE n t v body _ => do
-        --goExpr v 0
-        --goExpr body 0
-        --pure <| mqError targetType (toString appExpr)
-        --let fakeLam := Lean.mkApp (Lean.mkLambda n BinderInfo.implicit t body) t
-        let peBody := dirtyBR targetType body (v :: argStack) 0
-        breakApp sendTransforms targetType argStack callStack peBody (recDepthLeft-1)
-    | const c _ _ =>
-        -- check for common app constants: bind, pure, send, if/then/else
-        match c with
-        | ``Bind.bind =>
-            let b1 ← match argStack.get? 4 with
-                        | Option.none => pure <| mqError targetType "bad arg 1 to bind"
-                        | Option.some x => breakApp sendTransforms targetType argStack callStack x (recDepthLeft - 1)
-            let b2 ← match argStack.get? 5 with
-                        | Option.none => pure <| mqError targetType "bad arg 2 to bind"
-                        | Option.some x => breakApp sendTransforms targetType ((mqError targetType "nonDet arg from bind") :: argStack) callStack x (recDepthLeft - 1)
-            pure <| Lean.mkAppN (Lean.mkConst ``MonadSequence.Bind) #[targetType, b1, b2]
-        | ``Pure.pure => pure <| Lean.mkAppN (Lean.mkConst ``MonadSequence.Pure) #[targetType, Lean.mkConst ``Nat, Lean.mkNatLit 3]-- (argStack.get! 2)
-        | ``Sendable.send => do
-            let sending := argStack.get! 4
-            let et ← inferType sending
-            --goExpr sending 0
-            let m ← checkAgainstMonads et sendTransforms
-            --logInfo argStack
-            match m with
-            | Option.none => pure <| Lean.mkAppN (Lean.mkConst ``MonadSequence.Error) #[targetType, Lean.mkStrLit "no match for send"]--(argStack.get! 4)))
-            | Option.some f => pure <| Lean.mkAppN (Lean.mkConst ``MonadSequence.Command) #[targetType, Lean.mkAppN f #[argStack.get! 3, argStack.get! 4]]
-        | ``ite => do
-            --logInfo argStack
-            let b1 ← match argStack.get? 3 with
-                        | Option.none => pure <| mqError targetType "bad branch 1 to if/then/else"
-                        | Option.some x => breakApp sendTransforms targetType argStack callStack x (recDepthLeft - 1)
-            let b2 ← match argStack.get? 4 with
-                        | Option.none => pure <| mqError targetType "bad branch 2 to if/then/else"
-                        | Option.some x => breakApp sendTransforms targetType argStack callStack x (recDepthLeft - 1)
-            pure <| Lean.mkAppN (Lean.mkConst ``MonadSequence.NonDet) #[targetType, b1, b2]
-        | _ => do
-            -- check for recursion
-            let e ← getEnv
-            let v := e.find? c
-            match v with
-            | Option.none => pure <| mqError targetType ("Unknown const " ++ toString c)
-            | Option.some ci => do
-                match ci.value? with
-                | Option.none => do
-                        logInfo argStack
-                        pure <| mqError targetType ("no value for constantinfo of " ++ toString c ++ " constantinfo=" ++ toString ci.name ++ " ctor?=" ++ toString ci.isCtor ++ " inductive?=" ++ toString ci.isInductive)
-                | Option.some val => do
-                        if isMatchCall c
-                        then do
+elab "walkExpr" thing:term : term => walkExpr thing
+
+
+def TransformerApp : Type := List Expr → (List Expr → Expr → TermElabM Expr) → TermElabM Expr
+
+-- Dirty beta-reduce. We try to beta reduce functions, with the expectation that some
+-- expressions will be malformed since we may not have all the information we need.
+def magicBR (argStack : List Expr) (funcBody : Expr) (offset : Nat) : Expr :=
+    match funcBody with
+    | bvar ix _ => @Option.getD Expr (argStack.get? (offset - ix)) (Lean.mkStrLit "Bad bound variable")
+    | app f arg z => Expr.app (magicBR argStack f offset) (magicBR argStack arg offset) z
+    | lam n e c z => Expr.lam n e (magicBR argStack c (offset + 1)) z
+    | x => x
+
+
+#print KVMap
+
+--
+-- "You are a MAGIC SKELETON packed with MEAT and animated by ELECTRICITY and IMAGINATION.
+--  You have a cave in your face full of sharp bones and five tentacles at the end of each arm.
+--  YOU CAN DO ANYTHING, MAGIC SKELETON" -- Chuck Wendig
+--
+partial def magicSkeleton (transformers : List (String × TransformerApp)) (argStack : List Expr) (e : Expr) : TermElabM Expr :=
+    match e with
+    | const c _ _ => do
+        let fullName := c.toString
+        match c.components.getLast? with
+        | Option.none => pure <| Lean.mkStrLit fullName
+        | Option.some l => 
+            match transformers.lookup l.toString with
+            | Option.some f => f argStack (magicSkeleton transformers)
+            | Option.none => do
+                let e ← getEnv
+                let v := e.find? c
+                match v with
+                | Option.none => pure <| Lean.mkStrLit ("Unknown const " ++ toString c)
+                | Option.some ci => do
+                    match ci.value? with
+                    | Option.none => do
+                        --logInfo argStack
+                        pure <| Lean.mkStrLit ("no value for constantinfo of " ++ toString c ++ " constantinfo=" ++ toString ci.name ++ " ctor?=" ++ toString ci.isCtor ++ " inductive?=" ++ toString ci.isInductive)
+                    | Option.some val =>
+                        match (isMatchCall c), (transformers.lookup "match") with
+                        | true, Option.some matchBuild => do
                             let et ← inferType val
-                            --goExpr et 0
                             let matchArgs := unfoldForalls et
                             -- In a match "function", the first two args are motive and actual value, so we skip them.
                             -- The last argument of the type is the result, so ignore that too.
                             logInfo matchArgs
-                            --logInfo argStack
                             let branchCount := matchArgs.length - 3
                             -- pull the branches out of the argument stack
                             let branches := List.toArray <| List.take branchCount <| List.drop 2 argStack
-                            --logInfo branches
-                            let breakBranches ← Array.sequenceMap branches (fun z => breakApp sendTransforms targetType argStack callStack z (recDepthLeft-1))
-                            --let peBody := dirtyBR targetType (argStack.get! 2) argStack 0
-                            --breakApp sendTransforms targetType peBody argStack (recDepthLeft-1)
-                            pure <| listToNonDet targetType <| Array.toList breakBranches
-                        else do
-                            /-let m ← monadMatch et i1
-                            if m
-                            then pure <| Lean.mkApp (Lean.mkConst ``MonadSequence.Command) (Lean.mkStrLit "match")--(argStack.get! 4)))
-                            else -/
-                            let namedFunction ← breakApp sendTransforms targetType argStack (c :: callStack) val (recDepthLeft - 1)
-                            --pure <| Lean.mkAppN (Lean.mkConst ``MonadSequence.Label) #[targetType,Lean.mkStrLit c.toString, namedFunction]
-                            pure namedFunction
-    | _ => pure <| mqError targetType ("unknown term: " ++ toString appExpr)
+                            let breakBranches ← Array.sequenceMap branches (fun z => magicSkeleton transformers argStack z)
+                            matchBuild (Array.toList breakBranches) (magicSkeleton transformers)
+                        | _, _ => magicSkeleton transformers argStack val
+    | app f arg _ => magicSkeleton transformers (arg :: argStack) f
+    | lam _ _ body _ => do
+        -- try to substitute in bound variables and then skeletonize it
+        let peBody := magicBR argStack body 0
+        magicSkeleton transformers argStack peBody
+    | _ => do
+        --logInfo <| toString e
+        pure <| Lean.mkStrLit "zort"
 
-#print ConstantInfo
-elab "walkExpr" thing:term : term => walkExpr thing
+syntax (name := skeletonize) "goSkeleton" term " ::: " term : term
 
-elab "breakExpr" thing:term : term => do
-    let thingExpr ← elabTerm thing Option.none
-    breakApp [] (Lean.mkConst ``String) [] [] thingExpr 100
+set_option hygiene false in
+elab "genMagicSkeleton" skelName:ident " >: " transforms:term " :< " : command => do
+    let skelCommand ← 
+        `(@[termElab skeletonize]
+          def $skelName : TermElab := fun stx oxe => do
+              let e ← elabTerm (Syntax.getArg stx 1) Option.none
+              magicSkeleton $transforms [] e
+         )
+    elabCommand skelCommand
 
-elab "breakFreerExpr" thing:term " $: " target:term " :? " commands:term,+ " >: " results:term,+ " ?: " : term => do
-    let cmdExprs : Array Expr ← Array.sequenceMap ↑commands (fun e => elabTerm e Option.none)
-    let resultExprs : Array Expr ← Array.sequenceMap ↑results (fun e => elabTerm e Option.none)
-    let thingExpr ← elabTerm thing Option.none
-    let targetExpr ← elabTerm target Option.none
-    breakApp (Array.toList <| Array.zip cmdExprs resultExprs) targetExpr [] [] thingExpr 100
-    --pure <| Lean.mkStrLit "zoot!"
-    
-#eval walkExpr ((do let z ← pure 3; IO.println z) : IO Unit)
-#eval breakExpr ((IO.println 4) : IO Unit)
-#eval breakFreerExpr ((do IO.print 3; IO.print 4; pure 5) : IO Nat) $: Nat :? IO >: id ?:
+def x3 : Nat → Nat → Nat := fun z y => z + 3
+def ack : String → Nat := fun _ => 4
+def blargh2 : String → Nat := fun _ => 77
 
-def zzz : Nat → IO Unit := fun _ => IO.print "argh"
+structure Zort (a : Type) where
+  (v₁ : a) (v₂ : a)
 
-#eval breakExpr (fun n => if n < 3 then "argh" else "ack")
-#check @Pure.pure
+inductive FreerSkeleton (t : Type) where
+| Error : String → FreerSkeleton t
+| Empty
+| Pure : (α : Type) → α → FreerSkeleton t
+| Command : t → FreerSkeleton t 
+| Bind : FreerSkeleton t → FreerSkeleton t → FreerSkeleton t
+| NonDet : FreerSkeleton t → FreerSkeleton t → FreerSkeleton t
 
-def z':= Lean.mkConst `Nat.zero
+def dumpFreerSkeleton {t : Type} [ToString t] : FreerSkeleton t → String
+    | .Error e => "Error : " ++ e
+    | .Empty   => "Empty"
+    | .Pure tx x => "Pure ?"
+    | .Command t => "Command: " ++ toString t
+    | .Bind a b => dumpFreerSkeleton a ++ " >>= " ++ dumpFreerSkeleton b
+    | .NonDet a b => "(" ++ dumpFreerSkeleton a ++ " || " ++ dumpFreerSkeleton b ++ ")"
 
-#eval z'
+instance [ToString t] : ToString (FreerSkeleton t) where
+    toString := dumpFreerSkeleton
+
+def listToNonDetFreer (targetType : Expr) (l :List Expr) : Expr :=
+    match l with
+    | List.nil => Lean.mkApp (Lean.mkConst ``FreerSkeleton.Empty) targetType
+    | List.cons h List.nil => h
+    | List.cons h t => Lean.mkAppN (Lean.mkConst ``FreerSkeleton.NonDet) #[targetType, h, listToNonDetFreer targetType t]
+
+
+def stdMonadSkeleton (resultTypeName : Name) : List (String × TransformerApp) :=
+[
+    ⟨"bind",fun args mk => do
+        let a₁ ← mk args (args.get! 4)
+        let a₂ ← mk (Lean.mkStrLit "badArg" :: args) (args.get! 5)
+        pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.Bind) #[(Lean.mkConst resultTypeName), a₁,a₂]⟩,
+    ⟨"pure",fun args mk => do
+        let et := args.get! 2
+        let a := args.get! 3
+        pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.Pure) #[Lean.mkConst resultTypeName, et, a]⟩,
+    ⟨"ite",fun args mk => do
+        let b₁ ← mk args (args.get! 3)
+        let b₂ ← mk args (args.get! 4)
+        pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.NonDet) #[Lean.mkConst resultTypeName, b₁, b₂]⟩,
+    ⟨"match",fun branches mk => pure <| listToNonDetFreer (Lean.mkConst resultTypeName) branches⟩
+]
+
+--genMagicSkeleton mutexSkel >: stdMonadSkeleton ``String :<
+
+--#check goSkeleton (x3 (blargh2 "a") (ack "zoz")) ::: 7
+--#check goSkeleton (do let z ← pure 3; IO.println z : IO Unit) ::: 7
+
+--def x := goSkeleton (do let z ← pure 3; IO.println z : IO Unit) ::: 7
+
 
 end Deconstruct
