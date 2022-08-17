@@ -21,24 +21,24 @@ def goExpr (t : Expr) (indent : Nat) : MetaM Unit := do
   let preSpace := spaceN indent
   let dumpX := fun s => IO.println <| preSpace ++ s
   match t with
-  | bvar ix _ => dumpX <| "bvar=" ++ toString ix
-  | fvar fid _ => dumpX <| "fvar=" ++ toString fid.name
-  | mvar mid _ => dumpX <| "mvar=" ++ toString mid.name
-  | sort lvl _ => dumpX <| "sort"
-  | const n levels _ => dumpX <| "const=" ++ n.toString
-  | app f arg _ => dumpX "app "; goExpr f (indent+1); goExpr arg (indent+1)
+  | bvar ix => dumpX <| "bvar=" ++ toString ix
+  | fvar fid => dumpX <| "fvar=" ++ toString fid.name
+  | mvar mid => dumpX <| "mvar=" ++ toString mid.name
+  | sort lvl => dumpX <| "sort"
+  | const n levels => dumpX <| "const=" ++ n.toString
+  | app f arg => dumpX "app "; goExpr f (indent+1); goExpr arg (indent+1)
   | lam n arg body _ => dumpX ("lam > " ++ n.toString); goExpr arg (indent+1); goExpr body (indent+1)
   | forallE n a b _ => dumpX ("forall " ++ n.toString); goExpr a (indent+1); goExpr b (indent+1)
---  | letE n t v b _ => dumpX ("let " ++ n.toString); goExpr t (indent+1); goExpr v (indent+1); goExpr (b.instantiate1 v) (indent+1)
+--  | letE n t v b => dumpX ("let " ++ n.toString); goExpr t (indent+1); goExpr v (indent+1); goExpr (b.instantiate1 v) (indent+1)
   | letE n t v b _ => do
       dumpX ("let " ++ n.toString)
       goExpr t (indent+1)
       goExpr v (indent+1)
       goExpr b (indent+1)
-  | lit (Literal.natVal n) _ => dumpX <| "lit=" ++ toString n
-  | lit (Literal.strVal s) _ => dumpX <| "lit=" ++ s
-  | mdata md e _ => dumpX "mdata"
-  | proj n ix e _ => dumpX "proj"
+  | lit (Literal.natVal n) => dumpX <| "lit=" ++ toString n
+  | lit (Literal.strVal s) => dumpX <| "lit=" ++ s
+  | mdata md e => dumpX "mdata"
+  | proj n ix e => dumpX "proj"
 
 
 def walkExpr (thing : Syntax) : TermElabM Expr := do
@@ -81,8 +81,8 @@ def TransformerApp : Type := List Expr → (List Expr → Expr → TermElabM Exp
 -- expressions will be malformed since we may not have all the information we need.
 def magicBR (argStack : List Expr) (funcBody : Expr) (offset : Nat) : Expr :=
     match funcBody with
-    | bvar ix _ => @Option.getD Expr (argStack.get? (offset - ix)) (Lean.mkStrLit "Bad bound variable")
-    | app f arg z => Expr.app (magicBR argStack f offset) (magicBR argStack arg offset) z
+    | bvar ix => @Option.getD Expr (argStack.get? (offset - ix)) (Lean.mkStrLit "Bad bound variable")
+    | app f arg => Expr.app (magicBR argStack f offset) (magicBR argStack arg offset)
     | lam n e c z => Expr.lam n e (magicBR argStack c (offset + 1)) z
     | x => x
 
@@ -96,7 +96,7 @@ def magicBR (argStack : List Expr) (funcBody : Expr) (offset : Nat) : Expr :=
 --
 partial def magicSkeleton (transformers : List (String × TransformerApp)) (argStack : List Expr) (e : Expr) : TermElabM Expr :=
     match e with
-    | const c _ _ => do
+    | const c _ => do
         let fullName := c.toString
         match c.components.getLast? with
         | Option.none => pure <| Lean.mkStrLit fullName
@@ -127,13 +127,18 @@ partial def magicSkeleton (transformers : List (String × TransformerApp)) (argS
                             let breakBranches ← Array.sequenceMap branches (fun z => magicSkeleton transformers argStack z)
                             matchBuild (Array.toList breakBranches) (magicSkeleton transformers)
                         | _, _ => magicSkeleton transformers argStack val
-    | app f arg _ => magicSkeleton transformers (arg :: argStack) f
+    | app f arg => magicSkeleton transformers (arg :: argStack) f
     | lam _ _ body _ => do
         -- try to substitute in bound variables and then skeletonize it
         let peBody := magicBR argStack body 0
         magicSkeleton transformers argStack peBody
+    | bvar ix => pure <| Option.getD (argStack.get? ix) (Lean.mkStrLit "Error: bad bound variable")
+    | letE n t v body _ => do
+        logInfo <| argStack
+        let peBody := magicBR (v :: argStack) body 0
+        magicSkeleton transformers argStack peBody
     | _ => do
-        --logInfo <| toString e
+        logInfo <| toString e
         pure <| Lean.mkStrLit "zort"
 
 syntax (name := skeletonize) "goSkeleton" term " ::: " term : term
@@ -198,10 +203,10 @@ def stdMonadSkeleton (resultTypeName : Name) : List (String × TransformerApp) :
     ⟨"match",fun branches mk => pure <| listToNonDetFreer (Lean.mkConst resultTypeName) branches⟩
 ]
 
---genMagicSkeleton mutexSkel >: stdMonadSkeleton ``String :<
+genMagicSkeleton mutexSkel >: stdMonadSkeleton ``String :<
 
 --#check goSkeleton (x3 (blargh2 "a") (ack "zoz")) ::: 7
---#check goSkeleton (do let z ← pure 3; IO.println z : IO Unit) ::: 7
+--#check walkExpr (do let z ← pure 3; IO.println z : IO Unit)
 
 --def x := goSkeleton (do let z ← pure 3; IO.println z : IO Unit) ::: 7
 

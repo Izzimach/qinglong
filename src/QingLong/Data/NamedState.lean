@@ -4,7 +4,7 @@ import Lean.Parser.Term
 
 namespace NamedState
 
-open Lean Elab Command Term Meta 
+open Lean Elab Command Term Meta TSyntax
 
 
 --
@@ -60,13 +60,12 @@ class StateOperator (stateContainer : Type) (name : String) (state : Type) where
 -- This builds a structure representing state, with several fields in it. Each field "x"
 -- is a single state that is accessed using put x/get x.
 set_option hygiene false in
-def elabSS (structid : Syntax) (vals : Syntax.SepArray sep) : CommandElabM Unit := do
-    let valArray : Array Syntax := vals
-    let valInstance : Syntax → CommandElabM Syntax :=
+def elabSS (structid : TSyntax `Lean.Parser.Command.declId) (vals : Syntax.TSepArray `structfield ",") : CommandElabM Unit := do
+    let valArray : Array (TSyntax `structfield) := vals
+    let valInstance : TSyntax `structfield → CommandElabM (TSyntax `Lean.Parser.Command.structExplicitBinder) :=
       fun n => do
-        let id := n.getArgs[1]
-        let ftype := n.getArgs[3]
-        let s := Syntax.mkStrLit id.getId.toString
+        let id : Ident := TSyntax.mk <| n.raw.getArgs[1]!
+        let ftype : Term := TSyntax.mk <| n.raw.getArgs[3]!
         let c ← `(Lean.Parser.Command.structExplicitBinder | ($id : $ftype))
         pure c
     let fields ← Array.sequenceMap valArray valInstance
@@ -81,12 +80,12 @@ elab "mkStateIOStruct" structid:ident vals:structfield,+ " @@ " : command => ela
 -- This makes instances of StateOperator for a particular state container (a structure) and a named
 -- field of that structure. There should be an instance generated for each field of the structure.
 set_option hygiene false in
-def elabSI (structid : Syntax) (fields : Syntax.SepArray sep) : CommandElabM Unit := do
-  let fieldArray : Array Syntax := fields
-  let fieldInstance : Syntax → CommandElabM Unit :=
+def elabSI (structid :Term) (fields : Syntax.TSepArray `structfield ",") : CommandElabM Unit := do
+  let fieldArray : Array (TSyntax `structfield) := fields
+  let fieldInstance : TSyntax `structfield → CommandElabM Unit :=
     fun n => do
-      let id := n.getArgs[1]
-      let ftype := n.getArgs[3]
+      let id := TSyntax.mk n.raw.getArgs[1]!
+      let ftype : Term := TSyntax.mk n.raw.getArgs[3]!
       let s := Syntax.mkStrLit id.getId.toString
       let c ← `(instance : StateOperator $structid $s $ftype where
                   putS := fun v s => { s with $id:ident := v}
@@ -94,7 +93,7 @@ def elabSI (structid : Syntax) (fields : Syntax.SepArray sep) : CommandElabM Uni
       elabCommand c
   Array.forM fieldInstance fieldArray
 
-elab "mkStateInterfaces" structid:ident vals:structfield,+ " @@ " : command => elabSI structid vals
+elab "mkStateInterfaces" structid:term vals:structfield,+ " @@ " : command => elabSI structid vals
 
 -- Makes a complete set of definitions for a StateIO monad, including:
 --  A structure with fields to hold all the named states
@@ -103,7 +102,7 @@ elab "mkStateInterfaces" structid:ident vals:structfield,+ " @@ " : command => e
 -- You provide the monad name and field names/types.  For a StateIO monad named "x" there is also
 -- a State structure named "xstruct" which you can use.
 elab "mkStateIO" stateIOname:ident vals:structfield,+ " @@ " : command => do
-    let structid : Syntax := Lean.mkIdent <| Name.appendAfter stateIOname.getId "struct"
+    let structid : Ident := Lean.mkIdent <| Name.appendAfter stateIOname.getId "struct"
     elabSS structid vals
     elabSI structid vals
     let siodef ← `(def $stateIOname := StateIO $structid)

@@ -1,7 +1,11 @@
 import Lake
-open System Lake DSL
+open Lake DSL
 
 
-package QingLong (pkgDir) (args) {
-  srcDir := "src"
+package qinglong {
+}
+
+lean_lib QingLong {
+    srcDir := "src"
+    roots := #[`QingLong]
 }

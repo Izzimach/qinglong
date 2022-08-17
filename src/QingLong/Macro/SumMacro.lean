@@ -26,17 +26,17 @@ partial
 def compileSubId : Syntax → Name := fun subterm =>
     match subterm with
     | .missing => "missing_"
-    | .node info kind args =>
+    | .node _ kind args =>
         if kind == strLitKind
-        then compileSubId args[0]
+        then compileSubId args[0]!
         -- ignore parenthesis
         else if kind == ``Lean.Parser.Term.paren
-        then compileSubId args[1]
+        then compileSubId args[1]!
         -- for parameterized types we merge the function and its argument
         else if kind == ``Lean.Parser.Term.app
         then
-            let fName := compileSubId args[0]
-            let argNames := compileSubId args[1]
+            let fName := compileSubId args[0]!
+            let argNames := compileSubId args[1]!
             fName ++ argNames
         -- if we didn't handle the term already we just punt and try
         -- to fold together all the sub nodes, ignoring null or empty values
@@ -51,37 +51,38 @@ def compileSubId : Syntax → Name := fun subterm =>
         else if kind == `null
         then "null"
         else toString kind
-    | .atom info val => val
-    | .ident info rawVal val _ => val
+    | .atom _ val => val
+    | .ident _ _ val _ => val
  
 
-def sumCtorName2 : Syntax → Syntax → Name := fun sumid subterm => sumid.getId ++ Name.appendAfter (compileSubId subterm) "select"
+def sumCtorName2 : Ident → Term → Name := fun sumid subterm => sumid.getId ++ Name.appendAfter (compileSubId subterm) "select"
 
 -- to generate the sum type we basically need to generate constructors for each subtype
 -- and then tie it all together with an inductive view.
-def elabSumI (sumid : Syntax) (subids : Syntax.SepArray sep) : CommandElabM Unit := do
-    let subvals : Array Syntax := subids
-    let toCtor : Syntax → CommandElabM CtorView := 
+def elabSumI (sumid : Ident) (subids : Syntax.TSepArray `term ",") : CommandElabM Unit := do
+    let subvals : Array (TSyntax `term) := subids
+    let toCtor : Term → CommandElabM CtorView := 
       fun subterm => do
         let ty ← `({x : Type} → $subterm x → $sumid x)
         pure { ref := default,
-                inferMod := false,
                 modifiers := default,
                 declName := sumCtorName2 sumid subterm,
                 binders := Syntax.missing,
                 type? := ty
                 }
     let subCtors : Array CtorView ← Array.sequenceMap subvals toCtor
-    let indView := {
+    let indView : InductiveView := {
         ref := default,
         modifiers := {docString? := "argh"},
+        declId := sumid,
         shortDeclName := sumid.getId,
         declName      := sumid.getId,
         levelNames := [],
         binders := Syntax.missing,
         type? := (← `(Type → Type 1)),
         ctors := subCtors,
-        derivingClasses := #[]
+        derivingClasses := #[],
+        computedFields := #[]
         }
     elabInductiveViews #[indView]
 
@@ -91,8 +92,8 @@ elab "mkSumI" sumid:ident " o: " subids:term,+ ":o" : command => elabSumI sumid 
 
 
 
-def elabPrismatic (sumid : Syntax) (subterm: Syntax) : CommandElabM Unit := do
-    let ctorName : Syntax := Lean.mkIdent <| sumCtorName2 sumid subterm
+def elabPrismatic (sumid : Ident) (subterm: Term) : CommandElabM Unit := do
+    let ctorName : Ident := Lean.mkIdent <| sumCtorName2 sumid subterm
     let instanceCmd ←
       `(instance  : Prismatic $subterm ($sumid) where
           inject := fun sx => $ctorName sx
@@ -107,15 +108,17 @@ elab "mkPrismatic" sumid:ident subid:term : command => elabPrismatic sumid subid
 elab "mkSumType" sumid:ident " >| " subids:term,+ " |< " : command => do
     elabSumI sumid subids
     let mkP := fun subterm => elabPrismatic sumid subterm
-    Array.forM mkP (subids : Array Syntax)
+    Array.forM mkP (subids : Array Term)
 
 
 
-def elabCollapse (collapsertarget : Syntax) (sumid : Syntax) (subids: Syntax.SepArray sep) (collapsers : Syntax.SepArray sep) : TermElabM Expr := do
-    let evalBranch : (Syntax × Syntax) → TermElabM Syntax := fun ⟨subval, collapser⟩ => do
+def elabCollapse (collapsertarget : TSyntax `term) (sumid : Ident) (subids: Syntax.TSepArray `term sep) (collapsers : Syntax.TSepArray `term sep) : TermElabM Expr := do
+    let evalBranch : (TSyntax `term × TSyntax `term) → TermElabM (TSyntax `Lean.Parser.Term.matchAlt) := fun ⟨subval, collapser⟩ => do
         let ctorName := Lean.mkIdent <| sumCtorName2 sumid subval
         `(Parser.Term.matchAltExpr| | $ctorName x => $collapser x)
-    let branches ← Array.sequenceMap (Array.zip ↑subids collapsers) evalBranch
+    let subidsArray : Array (TSyntax `term) := subids
+    let collapsersArray : Array (TSyntax `term) := collapsers
+    let branches ← Array.sequenceMap (Array.zip subidsArray collapsersArray) evalBranch
     let collapserFunc ← `(fun {α : Type} (sumVal : $sumid α) => (match sumVal with $branches:matchAlt* : $collapsertarget α))
     elabTerm collapserFunc Option.none
 

@@ -25,8 +25,8 @@ macro "mkFreerInductive" freerName:ident f:ident : command =>
 
 set_option hygiene false in
 macro "mkFmap" freerName:ident fmapName:ident f:ident : command => do
-  let pureCtor : Syntax := Lean.mkIdent (freerName.getId ++ "Pure")
-  let impureCtor : Syntax := Lean.mkIdent (freerName.getId ++ "Impure")
+  let pureCtor := Lean.mkIdent (freerName.getId ++ "Pure")
+  let impureCtor := Lean.mkIdent (freerName.getId ++ "Impure")
   let c1pat ← `(matchAltExpr| | $pureCtor a => $pureCtor <| fab a)
   let c2pat ← `(matchAltExpr| | $impureCtor fx next => $impureCtor fx (fun z => $fmapName fab (next z)))
   let branches := #[c1pat,c2pat]
@@ -36,17 +36,16 @@ macro "mkFmap" freerName:ident fmapName:ident f:ident : command => do
 
 set_option hygiene false in
 macro "mkFFunctor" freerName:ident fmapName:ident f:ident : command => do
-  let c1c : Syntax := Lean.mkIdent (freerName.getId ++ "Pure")
-  let c2c : Syntax := Lean.mkIdent (freerName.getId ++ "Impure")
+  /-let c1c := Lean.mkIdent (freerName.getId ++ "Pure")
+  let c2c := Lean.mkIdent (freerName.getId ++ "Impure")
   let c1pat ← `(matchAltExpr| | $c1c a => $c1c a)
   let c2pat ← `(matchAltExpr| | $c2c fa => $c2c (Functor.map (xm f) fa))
-  let branches := #[c1pat,c2pat]
-  `(instance [Functor $f] : Functor $freerName where
-        map := $fmapName)
+  let branches := #[c1pat,c2pat]-/
+  `(instance [Functor $f] : Functor $freerName where map := $fmapName)
 
-def mkFMonadFunc (freerName : Syntax) (bindName : Syntax) (f :Syntax) : CommandElabM Unit := do
-  let c1c : Syntax := Lean.mkIdent (freerName.getId ++ "Pure")
-  let c2c : Syntax := Lean.mkIdent (freerName.getId ++ "Impure")
+def mkFMonadFunc (freerName : TSyntax `ident) (bindName : TSyntax `ident) : CommandElabM Unit := do
+  let c1c := Lean.mkIdent (freerName.getId ++ "Pure")
+  let c2c := Lean.mkIdent (freerName.getId ++ "Impure")
   let c1pat ← `(matchAltExpr| | $c1c a => f a)
   let c2pat ← `(matchAltExpr| | $c2c fa next => $c2c fa (fun z => $bindName (next z) f))
   let branches := #[c1pat,c2pat]
@@ -59,7 +58,7 @@ def mkFMonadFunc (freerName : Syntax) (bindName : Syntax) (f :Syntax) : CommandE
           bind := $bindName)
   elabCommand monadI
 
-elab "mkFMonad" freerName:ident bindName:ident f:ident : command => mkFMonadFunc freerName bindName f
+elab "mkFMonad" freerName:ident bindName:ident : command => mkFMonadFunc freerName bindName
 
 
 class Sendable (b : Type → Type) (m : Type → Type 1) where
@@ -74,17 +73,17 @@ def putNamed (n : String) {v : Type} (x : v) {m : Type → Type 1} [Sendable (Na
     Sendable.send <| @NamedState.Put n v x
 
 
-def mkSendableFunc (freerName : Syntax) (f : Syntax) : CommandElabM Unit := do
-  let c1c : Syntax := Lean.mkIdent (freerName.getId ++ "Pure")
-  let c2c : Syntax := Lean.mkIdent (freerName.getId ++ "Impure")
+def mkSendableFunc (freerName : TSyntax `ident) (f : TSyntax `ident) : CommandElabM Unit := do
+  let c1c := Lean.mkIdent (freerName.getId ++ "Pure")
+  let c2c := Lean.mkIdent (freerName.getId ++ "Impure")
   let cd ←
           `(instance {b : Type → Type} [Prismatic b $f] : Sendable b $freerName where
               send := fun v => $c2c (Prismatic.inject v) $c1c)
   elabCommand cd
 
-def mkInterpreterFunc (freerName : Syntax) (sumName : Syntax) (interpretName : Syntax) : CommandElabM Unit := do
-  let c1c : Syntax := Lean.mkIdent (freerName.getId ++ "Pure")
-  let c2c : Syntax := Lean.mkIdent (freerName.getId ++ "Impure")
+def mkInterpreterFunc (freerName : TSyntax `ident) (sumName : TSyntax `ident) (interpretName : TSyntax `ident) : CommandElabM Unit := do
+  let c1c := Lean.mkIdent (freerName.getId ++ "Pure")
+  let c2c := Lean.mkIdent (freerName.getId ++ "Impure")
   let c1pat ← `(matchAltExpr| | $c1c a => pure a)
   let c2pat ← `(matchAltExpr| | $c2c v next => bind (c v) (fun xx => $interpretName c (next xx)))
   let branches := #[c1pat,c2pat]
@@ -94,19 +93,19 @@ def mkInterpreterFunc (freerName : Syntax) (sumName : Syntax) (interpretName : S
   elabCommand cd
   
 
-def mkFreerFunc (freerName : Syntax) (f : Syntax) : CommandElabM Unit := do
-  let mapName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "mapX"
-  let bindName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "bindX"
+def mkFreerFunc (freerName : TSyntax `ident) (f : TSyntax `ident) : CommandElabM Unit := do
+  let mapName := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "mapX"
+  let bindName := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "bindX"
   --let bindIxName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "bindXX"
   --let reindexName : Syntax := Lean.mkIdent <| Name.mkSimple <| freerName.getId.toString ++ "reindexX"
-  let interpreterName : Syntax := Lean.mkIdent <| Name.mkSimple <| "run" ++ freerName.getId.toString
+  let interpreterName := Lean.mkIdent <| Name.mkSimple <| "run" ++ freerName.getId.toString
   let m1 ← `(mkFreerInductive $freerName $f)
   elabCommand m1
   let m2 ← `(mkFmap $freerName $mapName $f)
   elabCommand m2
   let m3 ← `(mkFFunctor $freerName $mapName $f)
   elabCommand m3
-  mkFMonadFunc freerName bindName f
+  mkFMonadFunc freerName bindName
   mkSendableFunc freerName f
   mkInterpreterFunc freerName f interpreterName
   /-

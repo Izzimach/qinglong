@@ -75,22 +75,12 @@ def gork := runExampleMonad interpreter1
 
 #check gork
 
-def blargh : t → t := fun x => x
-
-def x : ExampleMonad Nat := loopUntilResult <| do
-        putNamed "z" 5
-        --let (z:Nat) ← @getNamed "z" Nat _ _
-        pure <| Option.some 3
-
-
-
-#eval walkExpr ((do blargh <| putNamed "z" 5; pure 3) : ExampleMonad Nat)
 
 -- given a parameterized type, strip off the last parameter so it's (Type → Type)
 -- and compare to a monad type that is already of the form Type → Type
 def monadMatch : Expr → Expr → MetaM Bool := fun t m =>
     match t with
-    | app m2 _ _ => isDefEq m m2
+    | app m2 _ => isDefEq m m2
     | forallE n a b _ => monadMatch b m
     | _ => pure false
 
@@ -139,8 +129,8 @@ def tx : TermElabM (List (Expr × Expr)) := do
               `(fun (a : Type) (z : IO a) => "IO")⟩,
          ⟨`(NamedState "z" Nat),
               `(fun (a : Type) (x : NamedState "z" Nat a) => match x with 
-                                      | NamedState.Get => "Get"
-                                      | NamedState.Put x => "Put " ++ toString x)⟩]
+                                      | NamedState.Get => "Get z"
+                                      | NamedState.Put x => "Put z " ++ toString x)⟩]
     let runProd : TermElabM Syntax × TermElabM Syntax → TermElabM (Expr × Expr) :=
         fun ⟨n,t⟩ => do
            let nE ← elabTerm (← n) Option.none
@@ -148,24 +138,26 @@ def tx : TermElabM (List (Expr × Expr)) := do
            pure <| ⟨nE,tE⟩
     List.mapM runProd tm
 
-syntax (name := skeletonize) "goSkeleton" term " ::: " term : term
+syntax (name := skeletonize) "goSkeleton" term : term
 
 magicSendSkeleton freerSkel $: Lean.mkConst ``String >: tx :$    
 
 #check Sendable.send
 
 
-def yx : Nat → FreerSkeleton String := fun buzz => goSkeleton 
-    (do Sendable.send <| IO.println "argh"
-        putNamed "z" 3
-        match buzz with
-        | 0 => pure 3
-        | 1 => pure 5
-        | _ => pure 7
-        : ExampleMonad Nat)
-    ::: 7
+def yx {m : Type → Type 1} [Monad m] [Sendable IO m] [Sendable (NamedState "z" Nat) m] : Nat → m (Option Nat) :=
+    fun buzz => do
+       putNamed "z" 3
+       let z ← getNamed "z"
+       if z < 3
+       then do Sendable.send <| IO.println "argh"
+               pure Option.none
+       else pure <| Option.some 3
+    
 
-#eval toString <| yx 5
+#check walkExpr (do let z ← getNamed "z"; pure z : ExampleMonad Nat)
 
-#check goSkeleton (do Sendable.send <| IO.println "argh"; putNamed "z" 3; pure () : ExampleMonad Unit) ::: 7
+#eval toString <| goSkeleton (yx 5 : ExampleMonad (Option Nat))
+
+#check goSkeleton (do Sendable.send <| IO.println "argh"; putNamed "z" 3; pure () : ExampleMonad Unit)
 
