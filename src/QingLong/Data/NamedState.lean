@@ -9,6 +9,10 @@ open Lean Elab Command Term Meta TSyntax
 
 --
 -- A monad to read/write from multiples state variables, using string lookup.
+-- As an example if your state is the struct { z : Nat, y : String } then you
+-- can (getNamed "y") or (putNamed "z" 3) in your do block.
+-- If using algebraic effects you would need something like [Sendable (NamedState "z" Nat) m]
+-- to getNamed/putNamed z.
 --
 
 inductive NamedState (n : String) (v : Type) : Type → Type where
@@ -58,7 +62,7 @@ class StateOperator (stateContainer : Type) (name : String) (state : Type) where
 
 -- Normally a state monad has a single variable that you access using get/put.
 -- This builds a structure representing state, with several fields in it. Each field "x"
--- is a single state that is accessed using put x/get x.
+-- is a single state that is accessed using putNamed "x"/getNamed "x".
 set_option hygiene false in
 def elabSS (structid : TSyntax `Lean.Parser.Command.declId) (vals : Syntax.TSepArray `structfield ",") : CommandElabM Unit := do
     let valArray : Array (TSyntax `structfield) := vals
