@@ -34,7 +34,7 @@ def loopUntilResult {m : Type u → Type (u+1)} {α : Type u} [Inhabited α] [Mo
 
 -- Here we build a sum type and freer indexed monad to use. These will eventually get interpreted into a
 -- final monad implementing the state and IO
-mkSumType ExampleCommand >| (NamedState "z" Nat), (Concurrent Nat), IO |<
+mkSumType ExampleCommand >| (NamedState "y" String), (NamedState "z" Nat), (Concurrent Nat), IO |<
 mkFreer ExampleMonad ExampleCommand
 
 -- some "code" written to use a monad supporting state. This uses the NameState command to increment whatever
@@ -59,8 +59,10 @@ mkStateIO OneState (z:Nat), (y:String) @@
 -/
 
 -- The interpreter translates code from the abstract-ish ExampleCommand monad into the concrete OneState monad
-def interpreter1 := buildInterpreter ExampleCommand OneState (NamedState "z" Nat),(Concurrent Nat),IO
+def interpreter1 := buildInterpreter ExampleCommand OneState (NamedState "y" String), (NamedState "z" Nat),(Concurrent Nat),IO
     [:
+      -- NamedState "y" String
+      collapseNamedState "y" String,
       -- NamedState "z" Nat
       collapseNamedState "z" Nat,
       -- Concurrent Nat
@@ -71,7 +73,7 @@ def interpreter1 := buildInterpreter ExampleCommand OneState (NamedState "z" Nat
 
 def gork := runExampleMonad interpreter1
               exampleX -- code
-              {z := 3, y := "Argh"} -- initial state
+              {z := 3, y := "argh"} -- initial state
 
 #check gork
 
@@ -102,13 +104,13 @@ def checkAgainstMonads : Expr → List (Expr × Expr) → MetaM (Option Expr) :=
 
 
 def dispatchSend (converters : List (Expr × Expr)) (targetType : Expr) (argStack : List Expr) : TermElabM Expr := do
-    let m := argStack.get! 4
-    let et ← inferType m
+    let mv := argStack.get! 4
+    let et ← inferType mv
     --goExpr sending 0
     let m ← checkAgainstMonads et converters
     --logInfo argStack
     match m with
-    | Option.none => pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.Error) #[targetType, Lean.mkStrLit "no match for send"]--(argStack.get! 4)))
+    | Option.none => pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.Error) #[targetType, Lean.mkStrLit ("no match for send: " ++ toString mv)]--(argStack.get! 4)))
     | Option.some f => pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.Command) #[targetType, Lean.mkAppN f #[argStack.get! 3, argStack.get! 4]]
 
 
@@ -119,7 +121,7 @@ elab "magicSendSkeleton" skelName:ident " $: " target:term ">: " transforms:doEl
           def $skelName : TermElab := fun stx oxe => do
               let e ← elabTerm (Syntax.getArg stx 1) Option.none
               let t ← $transforms
-              magicSkeleton (stdMonadSkeleton ``String ++ [⟨"send",fun args mk => dispatchSend t $target args⟩]) [] e
+              magicSkeleton (stdMonadSkeleton ``String ++ [⟨"Freer.Sendable.send",fun args mk => dispatchSend t $target args⟩]) [] e
          )
     elabCommand skelCommand
 
@@ -130,7 +132,12 @@ def tx : TermElabM (List (Expr × Expr)) := do
          ⟨`(NamedState "z" Nat),
               `(fun (a : Type) (x : NamedState "z" Nat a) => match x with 
                                       | NamedState.Get => "Get z"
-                                      | NamedState.Put x => "Put z " ++ toString x)⟩]
+                                      | NamedState.Put x => "Put z " ++ toString x)⟩,
+         ⟨`(Concurrent Nat),
+              `(fun (a : Type) (x : Concurrent Nat a) => match x with
+                                      | Concurrent.Lock ix => "Lock " ++ toString ix
+                                      | Concurrent.Unlock ix => "Unlock " ++ toString ix)⟩
+                                    ]
     let runProd : TermElabM Syntax × TermElabM Syntax → TermElabM (Expr × Expr) :=
         fun ⟨n,t⟩ => do
            let nE ← elabTerm (← n) Option.none
@@ -142,22 +149,30 @@ syntax (name := skeletonize) "goSkeleton" term : term
 
 magicSendSkeleton freerSkel $: Lean.mkConst ``String >: tx :$    
 
-#check Sendable.send
+#check Freer.Sendable.send
 
 
-def yx {m : Type → Type 1} [Monad m] [Sendable IO m] [Sendable (NamedState "z" Nat) m] : Nat → m (Option Nat) :=
-    fun buzz => do
+def yx {m : Type → Type 1} [Monad m] [Sendable IO m] [Sendable (Concurrent Nat) m] [Sendable (NamedState "z" Nat) m] : Nat → m (Option Nat) :=
+    fun _ => do
        putNamed "z" 3
        let z ← getNamed "z"
+       Sendable.send <| Concurrent.Lock 1
        if z < 3
-       then do Sendable.send <| IO.println "argh"
+       then do @Sendable.send IO m _ Unit <| IO.println "argh"
                pure Option.none
        else pure <| Option.some 3
     
 
-#check walkExpr (do let z ← getNamed "z"; pure z : ExampleMonad Nat)
 
+#check Freer.Sendable.send
+
+#check walkExpr (do let z ← getNamed "z"; pure z : ExampleMonad Nat)
+#check instPrismaticNamedStateNatExampleCommand
+
+#check walkExpr (yx 5 : ExampleMonad (Option Nat))
+#check walkExpr (@Sendable.send IO)
+#check toString <| goSkeleton (yx 5 : ExampleMonad (Option Nat))
 #eval toString <| goSkeleton (yx 5 : ExampleMonad (Option Nat))
+--#check toString <| goSkeleton (@Freer.Sendable.send IO ExampleMonad _ Nat (pure 5))
 
 #check goSkeleton (do Sendable.send <| IO.println "argh"; putNamed "z" 3; pure () : ExampleMonad Unit)
-

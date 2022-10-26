@@ -7,7 +7,7 @@ import Lean.Parser
 import QingLong.Macro.FreerMacro
 
 
-open Lean Elab Expr Command Meta Term
+open Lean Elab Expr Command Meta Term MVarId
 open Freer
 
 #check evalExpr
@@ -20,7 +20,7 @@ partial
 def goExpr (t : Expr) (indent : Nat) : MetaM Unit := do
   let preSpace := spaceN indent
   let dumpX := fun s => IO.println <| preSpace ++ s
-  match t with
+  match (← instantiateMVars t) with
   | bvar ix => dumpX <| "bvar=" ++ toString ix
   | fvar fid => dumpX <| "fvar=" ++ toString fid.name
   | mvar mid => dumpX <| "mvar=" ++ toString mid.name
@@ -94,8 +94,8 @@ def magicBR (argStack : List Expr) (funcBody : Expr) (offset : Nat) : Expr :=
 --  You have a cave in your face full of sharp bones and five tentacles at the end of each arm.
 --  YOU CAN DO ANYTHING, MAGIC SKELETON" -- Chuck Wendig
 --
-partial def magicSkeleton (transformers : List (String × TransformerApp)) (argStack : List Expr) (e : Expr) : TermElabM Expr :=
-    match e with
+partial def magicSkeleton (transformers : List (String × TransformerApp)) (argStack : List Expr) (e : Expr) : TermElabM Expr := do
+    match (← instantiateMVars e) with
     | const c _ => do
         let fullName := c.toString
         match c.components.getLast? with
@@ -134,24 +134,56 @@ partial def magicSkeleton (transformers : List (String × TransformerApp)) (argS
         magicSkeleton transformers argStack peBody
     | bvar ix => pure <| Option.getD (argStack.get? ix) (Lean.mkStrLit "Error: bad bound variable")
     | letE n t v body _ => do
-        logInfo <| argStack
+        logInfo <| "letE, stack: " ++ argStack
         let peBody := magicBR (v :: argStack) body 0
         magicSkeleton transformers argStack peBody
+    | proj ty idx struct => do
+        let structVal ← magicSkeleton transformers argStack struct
+        let e ← getEnv
+        let debugStr :="proj:" ++ toString ty ++ "," ++ toString idx ++ "/" ++ toString structVal
+        match getStructureInfo? e ty with
+        | Option.none => pure <| mkStrLit debugStr
+        | Option.some info => do
+            match StructureInfo.getProjFn? info idx with
+            | Option.none => pure <| mkStrLit debugStr
+            | Option.some projName => do
+                match transformers.lookup projName.toString with
+                -- I though we would need to append structVal to here, but it was already dumped
+                -- onto the stack
+                | Option.some f => f argStack (magicSkeleton transformers)
+                | Option.none => do
+                    logInfo debugStr
+                    logInfo argStack
+                    pure <| mkStrLit (debugStr ++ "/" ++ toString projName)
+                --magicSkeleton transformers (structVal :: argStack) (mkConst projName)
+    | fvar _ => do
+        logInfo <| "fvar:" ++ toString e
+        pure <| Lean.mkStrLit "fvar"
+    | mvar _ => do
+        logInfo <| "mvar:" ++ toString e
+        pure <| Lean.mkStrLit "mvar"
+    | sort _ => do
+        logInfo <| "sort:" ++ toString e
+        pure <| Lean.mkStrLit "sort"
+    | mdata _ _ => do
+        logInfo <| "mdata:" ++ toString e
+        pure <| Lean.mkStrLit "mdata"
     | _ => do
-        logInfo <| toString e
-        pure <| Lean.mkStrLit "zort"
+        logInfo <| "zort:" ++ ctorName e ++ toString e
+        pure <| Lean.mkStrLit <| "zort" ++ ctorName e ++ "/" ++ toString e
 
-syntax (name := skeletonize) "goSkeleton" term " ::: " term : term
+syntax (name := skeletonize) "goSkeleton" term : term
 
 set_option hygiene false in
 elab "genMagicSkeleton" skelName:ident " >: " transforms:term " :< " : command => do
     let skelCommand ← 
         `(@[termElab skeletonize]
-          def $skelName : TermElab := fun stx oxe => do
+          def $skelName : TermElab := fun stx _ => do
               let e ← elabTerm (Syntax.getArg stx 1) Option.none
               magicSkeleton $transforms [] e
          )
     elabCommand skelCommand
+
 
 def x3 : Nat → Nat → Nat := fun z y => z + 3
 def ack : String → Nat := fun _ => 4
@@ -163,7 +195,7 @@ structure Zort (a : Type) where
 inductive FreerSkeleton (t : Type) where
 | Error : String → FreerSkeleton t
 | Empty
-| Pure : (α : Type) → α → FreerSkeleton t
+| Pure : (α : Type) → α → String → FreerSkeleton t
 | Command : t → FreerSkeleton t 
 | Bind : FreerSkeleton t → FreerSkeleton t → FreerSkeleton t
 | NonDet : FreerSkeleton t → FreerSkeleton t → FreerSkeleton t
@@ -171,7 +203,7 @@ inductive FreerSkeleton (t : Type) where
 def dumpFreerSkeleton {t : Type} [ToString t] : FreerSkeleton t → String
     | .Error e => "Error : " ++ e
     | .Empty   => "Empty"
-    | .Pure tx x => "Pure ?"
+    | .Pure tx x s => "Pure " ++ s
     | .Command t => "Command: " ++ toString t
     | .Bind a b => dumpFreerSkeleton a ++ " >>= " ++ dumpFreerSkeleton b
     | .NonDet a b => "(" ++ dumpFreerSkeleton a ++ " || " ++ dumpFreerSkeleton b ++ ")"
@@ -195,7 +227,7 @@ def stdMonadSkeleton (resultTypeName : Name) : List (String × TransformerApp) :
     ⟨"pure",fun args mk => do
         let et := args.get! 2
         let a := args.get! 3
-        pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.Pure) #[Lean.mkConst resultTypeName, et, a]⟩,
+        pure <| Lean.mkAppN (Lean.mkConst ``FreerSkeleton.Pure) #[Lean.mkConst resultTypeName, et, a, mkStrLit "?"]⟩,
     ⟨"ite",fun args mk => do
         let b₁ ← mk args (args.get! 3)
         let b₂ ← mk args (args.get! 4)
@@ -203,12 +235,21 @@ def stdMonadSkeleton (resultTypeName : Name) : List (String × TransformerApp) :
     ⟨"match",fun branches mk => pure <| listToNonDetFreer (Lean.mkConst resultTypeName) branches⟩
 ]
 
+/-
 genMagicSkeleton mutexSkel >: stdMonadSkeleton ``String :<
 
---#check goSkeleton (x3 (blargh2 "a") (ack "zoz")) ::: 7
---#check walkExpr (do let z ← pure 3; IO.println z : IO Unit)
+#check goSkeleton (x3 (blargh2 "a") (ack "zoz"))
+#check walkExpr (do let z ← pure 3; IO.println z : IO Unit)
+#check walkExpr (do IO.println 3)
 
---def x := goSkeleton (do let z ← pure 3; IO.println z : IO Unit) ::: 7
+def x := goSkeleton (do IO.println 3)
 
+
+-- what am I even doing
+#eval show MetaM Unit from do
+    let mvar1 ← mkFreshExprMVar (mkConst ``Nat) (userName := `mvar1)
+    assign mvar1.mvarId! (mkConst ``Nat.zero)
+    IO.println s!"meta1: {← instantiateMVars mvar1}"
+-/
 
 end Deconstruct
